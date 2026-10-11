@@ -163,9 +163,23 @@ final class NovaCPU {
             let n = memory.read8(pc); pc &+= 1
             let addr = dsp &+ UInt64(n) &* 8
             try dpush(memory.read64(addr))
+        case 0x0F: // ROLL n — rotate top n items (top goes to bottom of the n)
+            let n = Int(memory.read8(pc)); pc &+= 1
+            if n > 1 {
+                var tmp = [UInt64]()
+                for _ in 0..<n { tmp.append(try dpop()) }
+                // tmp[0] was top; move it to bottom: push tmp[0] first, then rest reversed
+                let top = tmp[0]
+                for i in (1..<n).reversed() { try dpush(tmp[i]) }
+                try dpush(top)
+            }
         case 0x10: // DEPTH
             let depth = (memory.dataStackBase &- dsp) / 8
             try dpush(depth)
+        case 0x11: // DSPGET
+            try dpush(dsp)
+        case 0x13: // FPGET
+            try dpush(fp)
         case 0x14: // ENTER n
             let n = memory.read8(pc); pc &+= 1
             try cpush(fp)
@@ -174,13 +188,16 @@ final class NovaCPU {
         case 0x15: // LEAVE
             dsp = fp
             fp = try cpop()
-        case 0x16: // LOADL n
+        case 0x16: // LOADL n — local n lives at FP-8*(n+1)
             let n = memory.read8(pc); pc &+= 1
-            try dpush(memory.read64(fp &- UInt64(n) &* 8))
+            try dpush(memory.read64(fp &- (UInt64(n) &+ 1) &* 8))
         case 0x17: // STORL n
             let n = memory.read8(pc); pc &+= 1
             let v = try dpop()
-            memory.write64(fp &- UInt64(n) &* 8, v)
+            memory.write64(fp &- (UInt64(n) &+ 1) &* 8, v)
+        case 0x18: // LOADARG n — arg n above frame: FP+8*n (0 = last pushed)
+            let n = memory.read8(pc); pc &+= 1
+            try dpush(memory.read64(fp &+ UInt64(n) &* 8))
 
         // ---- Integer ALU ----
         case 0x40: // ADD
@@ -211,6 +228,10 @@ final class NovaCPU {
             let b = Int64(bitPattern: try dpop())
             guard a != 0 else { throw NovaTrap.illegalInstruction }
             try dpush(UInt64(bitPattern: b % a))
+        case 0x47: // REMU
+            let a = try dpop(); let b = try dpop()
+            guard a != 0 else { throw NovaTrap.illegalInstruction }
+            try dpush(b % a)
         case 0x48: // AND
             let a = try dpop(); let b = try dpop()
             try dpush(b & a)
@@ -263,6 +284,12 @@ final class NovaCPU {
             try dpush(UInt64((try dpop()).nonzeroBitCount))
         case 0x5D: // REV8
             try dpush((try dpop()).byteSwapped)
+        case 0x5E: // EXT8 — sign-extend low 8 bits
+            try dpush(UInt64(bitPattern: Int64(Int8(bitPattern: UInt8(try dpop() & 0xFF)))))
+        case 0x5F: // EXT16
+            try dpush(UInt64(bitPattern: Int64(Int16(bitPattern: UInt16(try dpop() & 0xFFFF)))))
+        case 0x60: // EXT32
+            try dpush(UInt64(bitPattern: Int64(Int32(bitPattern: UInt32(try dpop() & 0xFFFFFFFF)))))
 
         // ---- Memory ----
         case 0x80: // LOAD8
@@ -273,6 +300,12 @@ final class NovaCPU {
             try dpush(memory.read64(addr))
         case 0x84: // LOADU8
             try dpush(UInt64(memory.read8(try dpop())))
+        case 0x85: // LOADU16
+            let addr85 = try dpop()
+            try dpush(UInt64(memory.read16(addr85)))
+        case 0x86: // LOADU32
+            let addr86 = try dpop()
+            try dpush(UInt64(memory.read32(addr86)))
         case 0x8A: // STORE64
             let addr = try dpop(); let v = try dpop()
             memory.write64(addr, v)
@@ -311,6 +344,15 @@ final class NovaCPU {
             let addr = try dpop()
             try cpush(pc)
             pc = addr
+        case 0xAD: // LOOP off16 — decrement top; if != 0 branch (keeps counter)
+            let off = Int64(Int16(bitPattern: memory.read16(pc))); pc &+= 2
+            let n = try dpop() &- 1
+            try dpush(n)
+            if n != 0 { pc = UInt64(Int64(bitPattern: pc) &+ off) }
+        case 0xAE: // TRAP code
+            let code = memory.read8(pc); pc &+= 1
+            tval = UInt64(code)
+            throw NovaTrap.breakpoint // generic software trap
 
         // ---- System ----
         case 0xC0: // ECALL
