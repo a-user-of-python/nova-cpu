@@ -82,8 +82,10 @@ stack juggling for hot values, loop counters, and pointers:
 | R14–R15 | Reserved |
 
 Access via `PUSHR n` (push R[n] onto the data stack) and `POPR n` (pop stack top
-into R[n]). The stack remains the primary computational model; registers are for
-values you want to keep close without shuffling the stack.
+into R[n]). For full visibility, `PUSHALL` dumps all 16 registers onto the stack
+at once (R0 first, R15 on top) and `POPALL` restores them — a complete register
+context switch in two instructions. The stack remains the primary computational
+model; registers are for values you want to keep close without shuffling the stack.
 
 ### 2.3 STATUS Register Layout
 

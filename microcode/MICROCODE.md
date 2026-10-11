@@ -122,6 +122,33 @@ R[T0] ← T1                  ; R[T0] = popped value
 HALT
 ```
 
+### 2.5b `PUSHALL` / `POPALL` (opcodes 0x1B/0x1C)
+```
+; PUSHALL: dump entire register file to data stack
+T0 ← 0
+PUSHALL_LOOP:
+  CMP T0, 16
+  BRANCH GEU, DONE
+  DPUSH R[T0]
+  ALU ADD, T0, T0, 1
+  JUMP PUSHALL_LOOP
+DONE:
+  HALT
+; POPALL: restore entire register file from data stack
+T0 ← 15
+POPALL_LOOP:
+  CMP T0, 0
+  BRANCH LT, DONE2
+  DPOP T1
+  R[T0] ← T1
+  ALU SUB, T0, T0, 1
+  JUMP POPALL_LOOP
+DONE2:
+  HALT
+```
+*Note: context switches use PUSHALL/POPALL to save/restore all programmer-visible
+register state in 2 instructions.*
+
 ### 2.6 `ADD` (opcode 0x40)
 ```
 DPOP T0             ; a

@@ -38,6 +38,8 @@ Notation: `S` = data stack. `a`, `b` = top two items (`a` = top). `PUSH x` pushe
 | `0x18` | LOADARG | 2 | `→ v` | Push argument N above frame (N = next byte) |
 | `0x19` | PUSHR | 2 | `→ v` | Push general register R[N] (N = next byte, 0–15) |
 | `0x1A` | POPR | 2 | `v →` | Pop stack top into R[N] (N = next byte, 0–15) |
+| `0x1B` | PUSHALL | 1 | `→ r0…r15` | Push all 16 registers (R0 first, R15 on top) |
+| `0x1C` | POPALL | 1 | `r0…r15 →` | Pop 16 values into R15…R0 (top of stack → R15) |
 
 ## 0x40–0x7F: Integer Arithmetic & Logic (zero-operand)
 

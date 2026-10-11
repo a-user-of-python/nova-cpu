@@ -15,6 +15,10 @@ final class NovaVMEngine: ObservableObject {
     private let memory: NovaMemory
     private var runThread: Thread?
 
+    // Register snapshot for the viewer (updated when halted — safe, no data race)
+    @Published var regSnapshot: [UInt64] = Array(repeating: 0, count: 16)
+    @Published var spSnapshot: (dsp: UInt64, csp: UInt64, pc: UInt64, fp: UInt64) = (0, 0, 0, 0)
+
     // Firmware toggle
     @Published var useFirmware: Bool = true
     @Published var useCustomFirmware: Bool = false
@@ -37,6 +41,7 @@ final class NovaVMEngine: ObservableObject {
                 self?.consoleText += "\n[TRAP \(trap) tval=0x\(String(tval, radix: 16))]\n"
                 self?.isRunning = false
                 self?.statusLine = "Trapped: \(trap)"
+                self?.snapshotRegisters()
             }
             self?.cpu.running = false
         }
@@ -94,6 +99,12 @@ final class NovaVMEngine: ObservableObject {
         }
     }
 
+    /// Snapshot all programmer-visible registers. Call only when halted.
+    func snapshotRegisters() {
+        regSnapshot = cpu.regs
+        spSnapshot = (cpu.dsp, cpu.csp, cpu.pc, cpu.fp)
+    }
+
     func start() {
         guard !cpu.running else { return }
         isRunning = true
@@ -103,6 +114,7 @@ final class NovaVMEngine: ObservableObject {
             DispatchQueue.main.async {
                 self?.isRunning = false
                 self?.statusLine = "Halted"
+                self?.snapshotRegisters()
             }
         }
         runThread?.name = "NOVA-VM"
@@ -121,5 +133,6 @@ final class NovaVMEngine: ObservableObject {
         resetCPUState()
         consoleText = ""
         statusLine = "Reset"
+        snapshotRegisters()
     }
 }
