@@ -1,0 +1,61 @@
+name: NOVA CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  assembler:
+    name: Assembler tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Assemble examples
+        run: |
+          python3 novas.py examples/hello.nova -o /tmp/hello.bin
+          python3 novas.py examples/fib.nova -o /tmp/fib.bin
+          ls -la /tmp/hello.bin /tmp/fib.bin
+
+      - name: Verify hello.bin starts with PUSH64 opcode
+        run: |
+          # First byte of hello.nova is PUSH64 (0x04)
+          test "$(od -An -tx1 -N1 /tmp/hello.bin | tr -d ' ')" = "04"
+
+      - name: Error cases must fail cleanly
+        run: |
+          echo "PUSH8 200" > /tmp/bad_imm.nova
+          if python3 novas.py /tmp/bad_imm.nova -o /tmp/bad.bin 2>/tmp/err.txt; then
+            echo "ERROR: out-of-range immediate was accepted"; exit 1
+          fi
+          grep -q "out of range" /tmp/err.txt
+          echo "FROBNICATE" > /tmp/bad_op.nova
+          if python3 novas.py /tmp/bad_op.nova -o /tmp/bad2.bin 2>/tmp/err2.txt; then
+            echo "ERROR: unknown mnemonic was accepted"; exit 1
+          fi
+          grep -q "Unknown mnemonic" /tmp/err2.txt
+          echo "All error cases handled correctly"
+
+  docs:
+    name: Docs site check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout gh-pages
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+
+      - name: Verify index.html exists and is valid HTML
+        run: |
+          test -f index.html
+          grep -q "<title>NOVA" index.html
+          echo "Docs site OK"
