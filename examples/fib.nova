@@ -1,0 +1,80 @@
+; fib.nova — compute fib(20), print result as decimal via console
+; Uses frames: ENTER/LEAVE, LOADL/STORL
+
+main:
+    PUSH8 20
+    CALL fib
+    ; print result as decimal
+    CALL print_dec
+    WFI
+
+fib:
+    ENTER 1          ; 1 local: n
+    STORL 0          ; local0 = n
+    LOADL 0
+    PUSH8 2
+    LT               ; n < 2 ?
+    BNZ base
+    ; fib(n-1) + fib(n-2)
+    LOADL 0
+    PUSH8 1
+    SUB
+    CALL fib         ; fib(n-1)
+    LOADL 0
+    PUSH8 2
+    SUB
+    CALL fib         ; fib(n-2)
+    ADD
+    LEAVE
+    RET
+base:
+    LOADL 0
+    LEAVE
+    RET
+
+; print_dec: pop number, print decimal digits
+print_dec:
+    ENTER 2          ; locals: num, div
+    STORL 0          ; num
+    PUSH64 10000000000
+    STORL 1          ; div = 10^10
+    PUSH8 0          ; started flag on stack (below frame? use local2 via PICK)
+    ; simple: skip leading zeros
+dec_loop:
+    LOADL 1          ; div
+    PUSH8 0
+    EQ
+    BNZ dec_done
+    LOADL 0          ; num
+    LOADL 1          ; div
+    DIV              ; digit = num / div
+    DUP
+    PUSH8 0
+    EQ
+    ; (simplified: always print, no leading-zero skip)
+    BNZ print_digit
+    POP
+    PUSH8 0x30
+    JMP do_print
+print_digit:
+    PUSH8 0x30
+    ADD              ; ascii
+do_print:
+    PUSH64 0xFFFFFFFFFFFF0000
+    SWAP
+    SWAP             ; addr, char → char addr? STORE8 wants v addr
+    ; stack: char, addr → need v addr order: v=char, addr=console
+    STORE8
+    ; num = num % div; div /= 10
+    LOADL 0
+    LOADL 1
+    REM
+    STORL 0
+    LOADL 1
+    PUSH8 10
+    DIV
+    STORL 1
+    JMP dec_loop
+dec_done:
+    LEAVE
+    RET

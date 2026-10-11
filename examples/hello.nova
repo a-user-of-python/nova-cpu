@@ -1,0 +1,45 @@
+; hello.nova — print "Hi NOVA!" via MMIO console
+; Console MMIO: write byte to 0xFFFF_FFFF_FFFF_0000
+; We use PUSH64 for the address, then STORE8 per char.
+
+main:
+    PUSH64 0xFFFFFFFFFFFF0000  ; console addr
+    ; print 'H' (0x48)
+    DUP
+    PUSH8 0x48
+    SWAP
+    STORE8
+    ; print 'i' (0x69)
+    DUP
+    PUSH8 0x69
+    SWAP
+    STORE8
+    ; print ' '
+    DUP
+    PUSH8 0x20
+    SWAP
+    STORE8
+    ; print 'N' 'O' 'V' 'A' '!'
+    DUP
+    PUSH8 0x4E
+    SWAP
+    STORE8
+    DUP
+    PUSH8 0x4F
+    SWAP
+    STORE8
+    DUP
+    PUSH8 0x56
+    SWAP
+    STORE8
+    DUP
+    PUSH8 0x41
+    SWAP
+    STORE8
+    DUP
+    PUSH8 0x21
+    SWAP
+    STORE8
+    POP          ; drop console addr
+    ; halt
+    WFI
