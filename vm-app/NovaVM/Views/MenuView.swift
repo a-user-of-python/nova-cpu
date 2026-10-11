@@ -9,6 +9,7 @@ struct MenuView: View {
     @State private var showingProgramPicker = false
     @State private var showingFirmwarePicker = false
     @State private var showingVM = false
+    @State private var showingSettings = false
     @State private var errorMessage: String?
     @State private var programName: String?
 
@@ -103,7 +104,13 @@ struct MenuView: View {
                 Text(engine.statusLine)
                     .font(.footnote)
                     .foregroundColor(.secondary)
-                    .padding(.bottom, 20)
+
+                // Settings
+                Button(action: { showingSettings = true }) {
+                    Label("Settings", systemImage: "gear")
+                        .font(.headline)
+                }
+                .padding(.bottom, 20)
             }
             .navigationBarHidden(true)
             .fileImporter(
@@ -127,6 +134,9 @@ struct MenuView: View {
             }
             .fullScreenCover(isPresented: $showingVM) {
                 VMView(engine: engine)
+            }
+            .sheet(isPresented: $showingSettings) {
+                SettingsView(engine: engine)
             }
         }
     }

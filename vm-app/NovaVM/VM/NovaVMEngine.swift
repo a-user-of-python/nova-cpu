@@ -12,8 +12,11 @@ final class NovaVMEngine: ObservableObject {
     @Published var statusLine: String = "Idle"
 
     private let cpu = NovaCPU()
-    private let memory: NovaMemory
+    private var memory: NovaMemory
     private var runThread: Thread?
+
+    // Live configuration (from NOVA/config.nova)
+    @Published var config: NovaConfig
 
     // Register snapshot for the viewer (updated when halted — safe, no data race)
     @Published var regSnapshot: [UInt64] = Array(repeating: 0, count: 16)
@@ -27,11 +30,16 @@ final class NovaVMEngine: ObservableObject {
     var customFirmwareName: String?
 
     // Memory size chosen by user (default 64MB)
-    let memorySize: Int
+    var memorySize: Int
 
-    init(memorySize: Int = 64 * 1024 * 1024) {
-        self.memorySize = memorySize
-        self.memory = NovaMemory(totalSize: memorySize)
+    init() {
+        // Set up the on-device folder structure first.
+        NovaFolders.setup()
+        let cfg = NovaFolders.loadOrCreateConfig()
+        self.config = cfg
+        let ramBytes = cfg.ramMB * 1024 * 1024
+        self.memorySize = ramBytes
+        self.memory = NovaMemory(totalSize: ramBytes)
         cpu.memory = memory
 
         // Wire stack pointers
@@ -58,6 +66,41 @@ final class NovaVMEngine: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Apply a new configuration: persist to config.nova, rebuild guest RAM
+    /// if the size changed, and re-tune the VM thread.
+    func applyConfig(_ cfg: NovaConfig) {
+        var c = cfg
+        let info = DeviceInfo.current
+        c.sanitize(maxCores: info.totalCores, maxP: info.pCores, maxE: info.eCores)
+        NovaFolders.save(c)
+        let ramBytes = c.ramMB * 1024 * 1024
+        if ramBytes != memorySize {
+            // Rebuild memory — requires app restart for full effect on some paths,
+            // but we swap it live here.
+            let newMem = NovaMemory(totalSize: ramBytes)
+            newMem.consoleOutput = memory.consoleOutput
+            self.memory = newMem
+            cpu.memory = newMem
+            self.memorySize = ramBytes
+        }
+        self.config = c
+        // Sync firmware toggle with config file
+        useFirmware = true
+        useCustomFirmware = c.firmware.lowercased() != "default"
+        resetCPUState()
+        statusLine = "Config applied (\(c.ramMB) MB, \(c.cpuCores) cores)"
+    }
+
+    /// Thread QoS derived from the P/E core preference.
+    /// P-heavy → userInteractive; balanced → userInitiated; E-heavy → utility.
+    private var threadQoS: QualityOfService {
+        let total = max(1, config.pCores + config.eCores)
+        let pRatio = Double(config.pCores) / Double(total)
+        if pRatio >= 0.66 { return .userInteractive }
+        if pRatio >= 0.33 { return .userInitiated }
+        return .utility
     }
 
     private func resetCPUState() {
@@ -87,11 +130,11 @@ final class NovaVMEngine: ObservableObject {
                 fw = NovaFirmware.defaultImage
             }
             // Firmware at 0x0, program at 0x1000
-            memory.loadBytes(fw, at: 0)
-            memory.loadBytes(data, at: 0x1000)
+            try memory.loadBytes(fw, at: 0)
+            try memory.loadBytes(data, at: 0x1000)
             cpu.pc = 0
         } else {
-            memory.loadBytes(data, at: 0)
+            try memory.loadBytes(data, at: 0)
             cpu.pc = 0
         }
         resetCPUState()
@@ -120,7 +163,7 @@ final class NovaVMEngine: ObservableObject {
             }
         }
         runThread?.name = "NOVA-VM"
-        runThread?.qualityOfService = .userInitiated
+        runThread?.qualityOfService = threadQoS
         runThread?.start()
     }
 

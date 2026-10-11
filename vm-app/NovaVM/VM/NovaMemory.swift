@@ -46,12 +46,17 @@ final class NovaMemory {
 
     static let pageSize = 4096
 
-    init(totalSize: Int = 64 * 1024 * 1024) {
-        self.totalSize = totalSize
-        self.sizeU64 = UInt64(totalSize)
-        self.bytes = ContiguousArray<UInt8>(repeating: 0, count: totalSize)
+    /// Hard cap: the VM can never allocate more than 1 GB of device RAM.
+    static let maxTotalSize = 1024 * 1024 * 1024
 
-        let top = UInt64(totalSize)
+    init(totalSize: Int = 64 * 1024 * 1024) {
+        // Clamp into [16MB, 1GB].
+        let clamped = min(max(totalSize, 16 * 1024 * 1024), Self.maxTotalSize)
+        self.totalSize = clamped
+        self.sizeU64 = UInt64(clamped)
+        self.bytes = ContiguousArray<UInt8>(repeating: 0, count: clamped)
+
+        let top = UInt64(clamped)
         self.vectorStackBase = top
         self.callStackBase   = top - 8 * 1024 * 1024
         self.dataStackBase   = top - 16 * 1024 * 1024
