@@ -61,6 +61,9 @@ final class NovaCPU {
     var running = false
     var trapHandler: ((NovaTrap, UInt64) -> Void)?
 
+    // General-purpose registers R0–R15 (programmer-visible)
+    var regs: [UInt64] = Array(repeating: 0, count: 16)
+
     // Scratch
     private var t0: UInt64 = 0
     private var t1: UInt64 = 0
@@ -198,6 +201,14 @@ final class NovaCPU {
         case 0x18: // LOADARG n — arg n above frame: FP+8*n (0 = last pushed)
             let n = memory.read8(pc); pc &+= 1
             try dpush(memory.read64(fp &+ UInt64(n) &* 8))
+        case 0x19: // PUSHR n — push R[n]
+            let n = memory.read8(pc); pc &+= 1
+            guard n < 16 else { tval = UInt64(n); throw NovaTrap.illegalInstruction }
+            try dpush(regs[Int(n)])
+        case 0x1A: // POPR n — pop into R[n]
+            let n = memory.read8(pc); pc &+= 1
+            guard n < 16 else { tval = UInt64(n); throw NovaTrap.illegalInstruction }
+            regs[Int(n)] = try dpop()
 
         // ---- Integer ALU ----
         case 0x40: // ADD

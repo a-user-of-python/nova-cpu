@@ -105,6 +105,23 @@ DPUSH T0
 HALT
 ```
 
+### 2.5a `PUSHR n` / `POPR n` (opcodes 0x19/0x1A)
+```
+; PUSHR n:
+FETCH T0                    ; T0 = register index
+CMP T0, 16
+BRANCH GEU, ILLEGAL          ; trap if n >= 16
+DPUSH R[T0]                 ; R[T0] = register file read
+HALT
+; POPR n:
+FETCH T0
+CMP T0, 16
+BRANCH GEU, ILLEGAL
+DPOP T1
+R[T0] ← T1                  ; R[T0] = popped value
+HALT
+```
+
 ### 2.6 `ADD` (opcode 0x40)
 ```
 DPOP T0             ; a

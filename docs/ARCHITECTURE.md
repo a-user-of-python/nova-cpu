@@ -67,6 +67,24 @@ NOVA has **few** registers — most state lives on stacks:
 **Scratch registers** (for microcode and firmware only, not general use):
 - `T0`, `T1` — 64-bit temporaries, clobbered across calls
 
+### 2.2a General-Purpose Registers
+
+NOVA also has **16 general-purpose 64-bit registers** (`R0–R15`) that programs
+can touch directly. They're the fast scratch space — no memory round-trip, no
+stack juggling for hot values, loop counters, and pointers:
+
+| Registers | Convention |
+|-----------|------------|
+| R0–R7 | Caller-saved temporaries |
+| R8–R11 | Callee-saved (must preserve across CALL) |
+| R12 | Global pointer (optional) |
+| R13 | Thread pointer (optional) |
+| R14–R15 | Reserved |
+
+Access via `PUSHR n` (push R[n] onto the data stack) and `POPR n` (pop stack top
+into R[n]). The stack remains the primary computational model; registers are for
+values you want to keep close without shuffling the stack.
+
 ### 2.3 STATUS Register Layout
 
 ```

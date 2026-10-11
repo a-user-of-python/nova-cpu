@@ -32,6 +32,7 @@ OPS = {
     'DEPTH': (0x10, 0), 'DSPGET': (0x11, 0), 'DSPSET': (0x12, 0), 'FPGET': (0x13, 0),
     'ENTER': (0x14, 1), 'LEAVE': (0x15, 0),
     'LOADL': (0x16, 1), 'STORL': (0x17, 1), 'LOADARG': (0x18, 1),
+    'PUSHR': (0x19, 1), 'POPR': (0x1A, 1),
     'ADD': (0x40, 0), 'SUB': (0x41, 0), 'MUL': (0x42, 0), 'MULH': (0x43, 0),
     'DIV': (0x44, 0), 'DIVU': (0x45, 0), 'REM': (0x46, 0), 'REMU': (0x47, 0),
     'AND': (0x48, 0), 'OR': (0x49, 0), 'XOR': (0x4A, 0),

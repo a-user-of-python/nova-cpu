@@ -36,6 +36,8 @@ Notation: `S` = data stack. `a`, `b` = top two items (`a` = top). `PUSH x` pushe
 | `0x16` | LOADL | 2 | `→ v` | Push local FP[N] (N = next byte) |
 | `0x17` | STORL | 2 | `v →` | Pop into local FP[N] (N = next byte) |
 | `0x18` | LOADARG | 2 | `→ v` | Push argument N above frame (N = next byte) |
+| `0x19` | PUSHR | 2 | `→ v` | Push general register R[N] (N = next byte, 0–15) |
+| `0x1A` | POPR | 2 | `v →` | Pop stack top into R[N] (N = next byte, 0–15) |
 
 ## 0x40–0x7F: Integer Arithmetic & Logic (zero-operand)
 
