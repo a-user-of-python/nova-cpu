@@ -39,7 +39,7 @@
 			93F97DD2F32FB264A280343F,
 			0125292F76FA59597E409BF5,
 			63BA240E3F42CCDCE19C1323,
-		); name = NovaVM; sourceTree = "<group>"; };
+		); name = NovaVM; path = NovaVM; sourceTree = "<group>"; };
 		0125292F76FA59597E409BF5 = {isa = PBXGroup; children = (
 			F182EBE4ED6F380F481523AD,
 			14FACCF3CFB9EA28D0F84566,
