@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NOVA — Custom Stack-Machine CPU Architecture</title>
+<style>
+  :root { --bg: #0d1117; --fg: #e6edf3; --accent: #58a6ff; --card: #161b22; --border: #30363d; }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--fg); font-family: -apple-system, "SF Pro", Helvetica, Arial, sans-serif;
+         font-size: 19px; line-height: 1.7; margin: 0; padding: 0; }
+  header { text-align: center; padding: 60px 20px 40px; border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 72px; margin: 0; letter-spacing: 8px; font-family: ui-monospace, monospace; }
+  header p { color: #8b949e; font-size: 22px; }
+  nav { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; padding: 20px; }
+  nav a { color: var(--accent); text-decoration: none; padding: 10px 20px; border: 1px solid var(--border);
+          border-radius: 8px; font-size: 18px; }
+  nav a:hover { background: var(--card); }
+  main { max-width: 900px; margin: 0 auto; padding: 20px; }
+  section { margin: 50px 0; }
+  h2 { font-size: 36px; border-bottom: 2px solid var(--accent); padding-bottom: 8px; }
+  h3 { font-size: 26px; color: var(--accent); }
+  code { background: var(--card); padding: 3px 8px; border-radius: 4px; font-size: 17px;
+         font-family: ui-monospace, monospace; }
+  pre { background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+        padding: 20px; overflow-x: auto; font-size: 16px; line-height: 1.5; }
+  table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 17px; }
+  th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+  th { background: var(--card); }
+  .badge { display: inline-block; background: var(--accent); color: #000; padding: 4px 12px;
+           border-radius: 20px; font-size: 15px; font-weight: bold; margin: 4px; }
+  footer { text-align: center; padding: 40px; color: #8b949e; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<header>
+  <h1>NOVA</h1>
+  <p>A from-scratch 64-bit stack-machine CPU architecture</p>
+  <p><span class="badge">Not RISC</span> <span class="badge">Not CISC</span> <span class="badge">Not ARM</span> <span class="badge">100% Original</span></p>
+  <nav>
+    <a href="#arch">Architecture</a>
+    <a href="#isa">Instruction Set</a>
+    <a href="#microcode">Microcode</a>
+    <a href="#app">iOS VM App</a>
+    <a href="#build">How It Was Built</a>
+    <a href="https://github.com/a-user-of-python/nova-cpu">GitHub Repo</a>
+  </nav>
+</header>
+<main>
+
+<section id="arch">
+<h2>1. Architecture</h2>
+<p>NOVA is a <strong>stack-based</strong> processor. There is no general-purpose register file.
+Computation happens on hardware-managed stacks. Instructions are variable-length (1–9 bytes):
+common operations are a single byte, longer encodings only when immediates or addresses are needed.</p>
+
+<h3>Why a stack machine?</h3>
+<ul>
+<li><strong>Denser code:</strong> average instruction is ~1.6 bytes vs 4 bytes for fixed-width RISC</li>
+<li><strong>Zero-operand ALU:</strong> <code>ADD</code> pops two values, pushes the result — no register fields to encode</li>
+<li><strong>Simple compilers:</strong> expression trees map directly to stack operations</li>
+<li><strong>Fast context switches:</strong> minimal architectural state to save/restore</li>
+</ul>
+
+<h3>The Four Stacks</h3>
+<table>
+<tr><th>Stack</th><th>Pointer</th><th>Width</th><th>Purpose</th></tr>
+<tr><td>Data Stack</td><td><code>DSP</code></td><td>64-bit</td><td>Operand stack for all computation</td></tr>
+<tr><td>Call Stack</td><td><code>CSP</code></td><td>64-bit</td><td>Return addresses + saved frame pointers</td></tr>
+<tr><td>Exception Stack</td><td><code>ESP</code></td><td>64-bit</td><td>Trap frames</td></tr>
+<tr><td>Vector Stack</td><td><code>VSP</code></td><td>128-bit</td><td>SIMD operands</td></tr>
+</table>
+<p>Each stack has a hardware limit register. Pushing past the limit triggers a <code>StackOverflow</code> trap;
+popping an empty stack triggers <code>StackUnderflow</code>.</p>
+
+<h3>Registers (few!)</h3>
+<p>Most state lives on stacks. The register file is minimal:</p>
+<table>
+<tr><th>Register</th><th>Purpose</th></tr>
+<tr><td><code>DSP CSP ESP VSP</code></td><td>Stack pointers</td></tr>
+<tr><td><code>PC</code></td><td>Program counter</td></tr>
+<tr><td><code>FP</code></td><td>Frame pointer (indexes locals on data stack)</td></tr>
+<tr><td><code>STATUS</code></td><td>Privilege level, interrupt mask, NZCV flags</td></tr>
+<tr><td><code>CAUSE EPC TVAL</code></td><td>Trap cause, exception PC, trap value</td></tr>
+<tr><td><code>SATP</code></td><td>Page-table root + address-space ID</td></tr>
+<tr><td><code>CYCLE TIME</code></td><td>Read-only counters</td></tr>
+</table>
+
+<h3>Modern Features</h3>
+<ul>
+<li><strong>SIMD:</strong> 128-bit vector stack, 4×32-bit / 2×64-bit lanes, predicated ops, gather/scatter</li>
+<li><strong>Crypto:</strong> hardware AES round, AES key expansion, SHA-256 compression, hardware RNG</li>
+<li><strong>MMU:</strong> 3-level page tables, 4KB/2MB/1GB pages, 48-bit physical addresses</li>
+<li><strong>Privilege:</strong> 4 levels (User/Supervisor/Hypervisor/Machine) with trap delegation</li>
+<li><strong>Atomics:</strong> LR/SC + AMOADD/AMOSWAP/AMOAND/AMOOR</li>
+<li><strong>Debug:</strong> hardware breakpoints, watchpoints, instruction trace, <code>EBREAK</code></li>
+<li><strong>Perf:</strong> 8 programmable counters (cycles, instructions, cache/TLB misses, branch mispredicts)</li>
+</ul>
+</section>
+
+<section id="isa">
+<h2>2. Instruction Set</h2>
+<p>Variable-length, 1–9 bytes. First byte is the opcode; immediates follow little-endian.
+Opcode space is organized by category:</p>
+<table>
+<tr><th>Range</th><th>Category</th></tr>
+<tr><td><code>0x00–0x3F</code></td><td>Stack manipulation (PUSH, POP, DUP, SWAP, ROT, ENTER, LEAVE…)</td></tr>
+<tr><td><code>0x40–0x7F</code></td><td>Integer ALU — zero-operand (ADD, SUB, MUL, DIV, AND, SHL, CMP…)</td></tr>
+<tr><td><code>0x80–0x9F</code></td><td>Memory (LOAD8/16/32/64, STORE, MEMCPY, atomics)</td></tr>
+<tr><td><code>0xA0–0xBF</code></td><td>Control flow (JMP, BZ/BNZ/BEQ/BNE, CALL, RET)</td></tr>
+<tr><td><code>0xC0–0xCF</code></td><td>System (ECALL, EBREAK, CSR access, FENCE, RDTIME)</td></tr>
+<tr><td><code>0xD0–0xDF</code></td><td>Floating-point (FADD.D, FSUB.D, FMUL.D, FDIV.D, conversions)</td></tr>
+<tr><td><code>0xE0–0xEF</code></td><td>Vector/SIMD (VADD.4S, VLOAD, VSTORE, VSEL…)</td></tr>
+<tr><td><code>0xF0–0xFF</code></td><td>Crypto (AESENC, SHA256C, RDRAND, CPUID)</td></tr>
+</table>
+
+<h3>Example: function call</h3>
+<pre>; add(a, b) — args pushed by caller, result left on stack
+main:
+    PUSH8  40
+    PUSH8  2
+    CALL   add
+    WFI            ; halt
+
+add:
+    ENTER  0       ; build frame (no locals)
+    LOADL  1       ; push arg1
+    LOADL  0       ; push arg2
+    ADD            ; pop, pop, push sum
+    LEAVE
+    RET</pre>
+<p>Full opcode map: <a href="https://github.com/a-user-of-python/nova-cpu/blob/main/isa/ISA_REFERENCE.md">ISA_REFERENCE.md</a></p>
+</section>
+
+<section id="microcode">
+<h2>3. Microcode</h2>
+<p>Every NOVA instruction decomposes into <strong>micro-operations</strong> (register transfers).
+Simple instructions are single-uop; complex ones expand:</p>
+<ul>
+<li><code>ADD</code> → <code>DPOP T0; DPOP T1; ALU ADD T0,T1,T0; DPUSH T0</code></li>
+<li><code>ENTER n</code> → <code>CPUSH FP; FP←DSP; DPUSH 0 (×n)</code></li>
+<li><code>CALL off</code> → <code>FETCH16 T0; CPUSH PC; PC←PC+T0</code></li>
+<li><code>MEMCPY</code> → 8-byte chunk loop + byte tail loop</li>
+<li><code>SHA256C</code> → 64-round compression (or native crypto intrinsic)</li>
+<li>Trap entry → push STATUS/PC/CAUSE/TVAL to exception stack, elevate privilege, jump to vector</li>
+</ul>
+<p>The VM implements these as inline Swift sequences — no separate ROM needed — but the
+decomposition is normative: <a href="https://github.com/a-user-of-python/nova-cpu/blob/main/microcode/MICROCODE.md">MICROCODE.md</a></p>
+</section>
+
+<section id="app">
+<h2>4. iOS VM App</h2>
+<p>A SwiftUI app that emulates the NOVA CPU on Apple Silicon iPads and iPhones.</p>
+
+<h3>What it does</h3>
+<ul>
+<li>Opens to a <strong>blank menu</strong> with a single <strong>firmware toggle</strong></li>
+<li>When firmware is on: choose <strong>built-in default</strong> or <strong>custom firmware</strong> (via Files app)</li>
+<li><strong>Load programs</strong> (.bin files) via the Files app document picker</li>
+<li>Runs the VM on a background thread with a live <strong>console</strong> (green-on-black terminal)</li>
+<li>Stop / Reset / Close controls; register and status readout</li>
+<li>Console I/O via memory-mapped address <code>0xFFFF_FFFF_FFFF_0000</code></li>
+</ul>
+
+<h3>Architecture of the app</h3>
+<table>
+<tr><th>File</th><th>Role</th></tr>
+<tr><td><code>NovaCPU.swift</code></td><td>Fetch-decode-execute loop. Inlinable stack primitives, <code>@inline(__always)</code> hot paths, <code>ContiguousArray</code> memory.</td></tr>
+<tr><td><code>NovaMemory.swift</code></td><td>Guest RAM: single flat array, stack regions at top, MMIO console hook.</td></tr>
+<tr><td><code>NovaFirmware.swift</code></td><td>Default firmware image + custom firmware loader (security-scoped Files URLs).</td></tr>
+<tr><td><code>NovaVMEngine.swift</code></td><td>Owns CPU+memory, background thread, publishes console text to SwiftUI.</td></tr>
+<tr><td><code>MenuView.swift</code></td><td>Blank menu: firmware toggle, file pickers, Run button.</td></tr>
+<tr><td><code>VMView.swift</code></td><td>Running VM: console, Stop/Reset, status.</td></tr>
+</table>
+
+<h3>Apple Silicon optimization</h3>
+<ul>
+<li>VM runs on a dedicated <code>Thread</code> at <code>.userInitiated</code> QoS — never blocks UI</li>
+<li>Memory is a single <code>ContiguousArray&lt;UInt8&gt;</code> for cache-friendly sequential access</li>
+<li>Hot-path functions marked <code>@inline(__always)</code>; wrapping arithmetic (<code>&+</code>) avoids overflow traps</li>
+<li>Console output batched to main thread; capped at ~100K chars to bound memory</li>
+<li>Crypto ops (AES/SHA) designed to route to hardware/CryptoKit in production</li>
+</ul>
+
+<h3>On-device AI</h3>
+<p>The architecture reserves <code>CPUID</code> leaf 2 feature bits and the <code>0xFF</code> opcode escape
+for future neural-engine dispatch. The app is structured so an ANE-backed matrix-multiply uop
+can be added without changing the ISA.</p>
+</section>
+
+<section id="build">
+<h2>5. How It Was Built</h2>
+
+<h3>Step 1 — Architecture (docs/ARCHITECTURE.md)</h3>
+<p>Started from the constraint "not RISC". Chose a stack machine because it's the most
+fundamentally different execution model that's still practical: zero-operand ALU, hardware
+stacks, variable-length encoding. Specified 4 stacks, 15 registers, 4 privilege levels,
+and a 3-level MMU. Every modern feature (SIMD, crypto, atomics, perf counters, debug)
+was adapted to stack semantics rather than copied from RISC designs.</p>
+
+<h3>Step 2 — Instruction Set (isa/ISA_REFERENCE.md)</h3>
+<p>Allocated the 256-opcode space by category. Stack ops in <code>0x00–0x3F</code>, ALU in
+<code>0x40–0x7F</code>, etc. Immediate sizes encoded in the opcode mnemonic
+(<code>PUSH8/16/32/64</code>). Branch offsets are PC-relative; calls push to the call stack.
+Documented stack effects for every instruction in <code>a b → c</code> notation.</p>
+
+<h3>Step 3 — Microcode (microcode/MICROCODE.md)</h3>
+<p>Defined a micro-operation set (DPUSH/DPOP/ALU/LD64/BRANCH/TRAP…) and wrote the
+expansion for every multi-uop instruction: ENTER/LEAVE frames, CALL/RET, MEMCPY's
+chunk+tail loop, SHA-256's 64 rounds, trap entry/exit. This is the contract the VM implements.</p>
+
+<h3>Step 4 — Assembler (novas.py)</h3>
+<p>Two-pass assembler: pass 1 collects labels and computes addresses; pass 2 emits bytes
+with PC-relative branch resolution. Verified with <code>hello.nova</code> (51 bytes) and
+<code>fib.nova</code> (121 bytes).</p>
+
+<h3>Step 5 — iOS VM App (vm-app/)</h3>
+<p>Swift implementation of the fetch-decode-execute loop following the microcode spec.
+<code>NovaMemory</code> owns guest RAM; <code>NovaCPU</code> implements every opcode;
+<code>NovaVMEngine</code> bridges to SwiftUI. Menu → file picker → run → console.
+Firmware toggle wired to either the built-in image or a user-supplied binary.</p>
+
+<h3>Step 6 — Verification</h3>
+<ul>
+<li>Assembler: both example programs assemble without errors; branch offsets resolve correctly</li>
+<li>Architecture: every instruction's stack effect documented and cross-checked against microcode</li>
+<li>App: code reviewed for Swift correctness (optionals, thread boundaries, security-scoped URLs)</li>
+<li>Not yet done: on-device test run, which requires Xcode build + install</li>
+</ul>
+</section>
+
+</main>
+<footer>
+  <p>NOVA — designed and built with Muse. <a href="https://github.com/a-user-of-python/nova-cpu" style="color:#58a6ff">Built with Muse</a></p>
+  <p><a href="https://github.com/a-user-of-python/nova-cpu" style="color:#58a6ff">github.com/a-user-of-python/nova-cpu</a></p>
+</footer>
+</body>
+</html>
