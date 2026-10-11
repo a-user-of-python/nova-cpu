@@ -1,0 +1,114 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+		B591E7D9411D397C940DFAE2 = {isa = PBXBuildFile; fileRef = FF87E34CFA25A1C7809031A7; };
+		B342FEB8CF375FCEC424C0E9 = {isa = PBXBuildFile; fileRef = F182EBE4ED6F380F481523AD; };
+		EAC40610DB7F1E6C4957C3C6 = {isa = PBXBuildFile; fileRef = 14FACCF3CFB9EA28D0F84566; };
+		B3B05A40718D79B1DED9FD13 = {isa = PBXBuildFile; fileRef = A2BED964760094357AF63864; };
+		85FC3703A028F02A78E99344 = {isa = PBXBuildFile; fileRef = BD8ABFF03A6E2E7D2BF3AD36; };
+		C97DDA39B3010C3B739A63DC = {isa = PBXBuildFile; fileRef = BE48BC4FACF7D3829A67F7DA; };
+		0A158FE4504F30B80CE31DFB = {isa = PBXBuildFile; fileRef = EB69D50B5FBE86880BBC5378; };
+		9F582E45B1B07065C2AC11F6 = {isa = PBXBuildFile; fileRef = CEEBDF305ABA87CD42835BCF; };
+		A1034AAF050DDD615ED4001A = {isa = PBXBuildFile; fileRef = 8308D1430C98E0CFFBBEA8AF; };
+		3C2A4F33991BA669F90FA7C1 = {isa = PBXBuildFile; fileRef = 93F97DD2F32FB264A280343F; };
+		FF87E34CFA25A1C7809031A7 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NovaVMApp.swift"; sourceTree = "<group>"; };
+		F182EBE4ED6F380F481523AD = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NovaCPU.swift"; sourceTree = "<group>"; };
+		14FACCF3CFB9EA28D0F84566 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NovaMemory.swift"; sourceTree = "<group>"; };
+		A2BED964760094357AF63864 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NovaFirmware.swift"; sourceTree = "<group>"; };
+		BD8ABFF03A6E2E7D2BF3AD36 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NovaVMEngine.swift"; sourceTree = "<group>"; };
+		BE48BC4FACF7D3829A67F7DA = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NovaConfig.swift"; sourceTree = "<group>"; };
+		EB69D50B5FBE86880BBC5378 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DeviceInfo.swift"; sourceTree = "<group>"; };
+		CEEBDF305ABA87CD42835BCF = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MenuView.swift"; sourceTree = "<group>"; };
+		8308D1430C98E0CFFBBEA8AF = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "VMView.swift"; sourceTree = "<group>"; };
+		93F97DD2F32FB264A280343F = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView.swift"; sourceTree = "<group>"; };
+		2C090C541E206D79AB76701F = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NovaVM.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8D3FC6DB5D0827F168A73277 = {isa = PBXGroup; children = (42DD5DD174D070EE4A104434, 1BADDC1D73C1A20F347483E1,); sourceTree = "<group>"; };
+		42DD5DD174D070EE4A104434 = {isa = PBXGroup; children = (
+			F182EBE4ED6F380F481523AD,
+			14FACCF3CFB9EA28D0F84566,
+			A2BED964760094357AF63864,
+			BD8ABFF03A6E2E7D2BF3AD36,
+			BE48BC4FACF7D3829A67F7DA,
+			EB69D50B5FBE86880BBC5378,
+			CEEBDF305ABA87CD42835BCF,
+			8308D1430C98E0CFFBBEA8AF,
+			93F97DD2F32FB264A280343F,
+			0125292F76FA59597E409BF5,
+			63BA240E3F42CCDCE19C1323,
+		); name = NovaVM; sourceTree = "<group>"; };
+		0125292F76FA59597E409BF5 = {isa = PBXGroup; children = (
+			F182EBE4ED6F380F481523AD,
+			14FACCF3CFB9EA28D0F84566,
+			A2BED964760094357AF63864,
+			BD8ABFF03A6E2E7D2BF3AD36,
+			BE48BC4FACF7D3829A67F7DA,
+			EB69D50B5FBE86880BBC5378,
+		); name = VM; sourceTree = "<group>"; };
+		63BA240E3F42CCDCE19C1323 = {isa = PBXGroup; children = (
+			CEEBDF305ABA87CD42835BCF,
+			8308D1430C98E0CFFBBEA8AF,
+			93F97DD2F32FB264A280343F,
+		); name = Views; sourceTree = "<group>"; };
+		1BADDC1D73C1A20F347483E1 = {isa = PBXGroup; children = (2C090C541E206D79AB76701F,); name = Products; sourceTree = "<group>"; };
+		48BB24C931BF459F62813A08 = {isa = PBXNativeTarget; buildConfigurationList = 3F4B69E1C2D7780B6DE87DC8;
+			buildPhases = (F680599402C0D80E245DE801, 6BC9136C2E1B992EF374A2EA, 781C774F390DF12CD292A30B,);
+			buildRules = (); dependencies = (); name = NovaVM;
+			productName = NovaVM; productReference = 2C090C541E206D79AB76701F; productType = "com.apple.product-type.application"; };
+		F680599402C0D80E245DE801 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
+			B591E7D9411D397C940DFAE2,
+			B342FEB8CF375FCEC424C0E9,
+			EAC40610DB7F1E6C4957C3C6,
+			B3B05A40718D79B1DED9FD13,
+			85FC3703A028F02A78E99344,
+			C97DDA39B3010C3B739A63DC,
+			0A158FE4504F30B80CE31DFB,
+			9F582E45B1B07065C2AC11F6,
+			A1034AAF050DDD615ED4001A,
+			3C2A4F33991BA669F90FA7C1,
+		); runOnlyForDeploymentPostprocessing = 0; };
+		6BC9136C2E1B992EF374A2EA = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		781C774F390DF12CD292A30B = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		46F86FAA6BBF9AC94A7E4595 = {isa = PBXProject; buildConfigurationList = B8DC26C9631EB163173A49E6;
+			compatibilityVersion = "Xcode 14.0"; developmentRegion = en;
+			hasScannedForEncodings = 0; knownRegions = (en,);
+			mainGroup = 8D3FC6DB5D0827F168A73277; productRefGroup = 1BADDC1D73C1A20F347483E1;
+			projectDirPath = ""; projectRoot = "";
+			targets = (48BB24C931BF459F62813A08,); };
+		B8DC26C9631EB163173A49E6 = {isa = XCConfigurationList; buildConfigurations = (765E6C4E5A890C96F6AB9A03, A0E17C00052082C237FD3700,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		3F4B69E1C2D7780B6DE87DC8 = {isa = XCConfigurationList; buildConfigurations = (A7688EC0FBCAEE3AC10FE473, B97B4C92D6B4C9AEC89C8D89,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		765E6C4E5A890C96F6AB9A03 = {isa = XCBuildConfiguration; buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				SWIFT_VERSION = 5.0;
+			}; name = Debug; };
+		A0E17C00052082C237FD3700 = {isa = XCBuildConfiguration; buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				SWIFT_VERSION = 5.0;
+			}; name = Release; };
+		A7688EC0FBCAEE3AC10FE473 = {isa = XCBuildConfiguration; buildSettings = {
+				PRODUCT_NAME = $(TARGET_NAME);
+				PRODUCT_BUNDLE_IDENTIFIER = com.nova.vm;
+				INFOPLIST_FILE = NovaVM/Info.plist;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1,2;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				CODE_SIGN_STYLE = Manual;
+			}; name = Debug; };
+		B97B4C92D6B4C9AEC89C8D89 = {isa = XCBuildConfiguration; buildSettings = {
+				PRODUCT_NAME = $(TARGET_NAME);
+				PRODUCT_BUNDLE_IDENTIFIER = com.nova.vm;
+				INFOPLIST_FILE = NovaVM/Info.plist;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1,2;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				CODE_SIGN_STYLE = Manual;
+				SWIFT_OPTIMIZATION_LEVEL = -O;
+			}; name = Release; };
+	};
+	rootObject = 46F86FAA6BBF9AC94A7E4595;
+}
