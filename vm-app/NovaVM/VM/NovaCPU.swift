@@ -1,29 +1,10 @@
 // NovaCPU.swift — NOVA stack-machine CPU emulator
 // Optimized for Apple Silicon (M3+) withContiguousArray storage,
 // inlinable hot paths, and minimal ARC traffic in the fetch loop.
+//
+// NOTE: NovaTrap is defined in NovaMemory.swift (shared).
 
 import Foundation
-
-// MARK: - Trap Causes
-enum NovaTrap: UInt64 {
-    case instrAddrMisaligned = 0
-    case instrAccessFault    = 1
-    case illegalInstruction  = 2
-    case breakpoint          = 3
-    case loadAddrMisaligned  = 4
-    case loadAccessFault     = 5
-    case storeAddrMisaligned = 6
-    case storeAccessFault    = 7
-    case ecallU              = 8
-    case ecallS              = 9
-    case ecallH              = 10
-    case ecallM              = 11
-    case instrPageFault      = 12
-    case loadPageFault       = 13
-    case storePageFault      = 14
-    case stackOverflow       = 15
-    case stackUnderflow      = 16
-}
 
 // MARK: - Privilege
 enum NovaPrivilege: UInt64 {
@@ -77,7 +58,7 @@ final class NovaCPU {
     @inline(__always) func dpush(_ v: UInt64) throws {
         let nsp = dsp &- 8
         if nsp < dslim { throw NovaTrap.stackOverflow }
-        memory.write64(nsp, v)
+        try memory.write64(nsp, v)
         dsp = nsp
     }
 
@@ -85,7 +66,7 @@ final class NovaCPU {
         // Underflow check: DSP must be below stack base.
         // Stack base tracked by memory object.
         if dsp >= memory.dataStackBase { throw NovaTrap.stackUnderflow }
-        let v = memory.read64(dsp)
+        let v = try memory.read64(dsp)
         dsp = dsp &+ 8
         return v
     }
@@ -93,13 +74,13 @@ final class NovaCPU {
     @inline(__always) func cpush(_ v: UInt64) throws {
         let nsp = csp &- 8
         if nsp < cslim { throw NovaTrap.stackOverflow }
-        memory.write64(nsp, v)
+        try memory.write64(nsp, v)
         csp = nsp
     }
 
     @inline(__always) func cpop() throws -> UInt64 {
         if csp >= memory.callStackBase { throw NovaTrap.stackUnderflow }
-        let v = memory.read64(csp)
+        let v = try memory.read64(csp)
         csp = csp &+ 8
         return v
     }
@@ -118,7 +99,7 @@ final class NovaCPU {
     // MARK: - Main step
 
     func step() throws {
-        let opcode = memory.read8(pc)
+        let opcode = try memory.read8(pc)
         pc &+= 1
         cycle &+= 1
 
@@ -126,21 +107,21 @@ final class NovaCPU {
         // ---- Stack manipulation ----
         case 0x00: break // NOP
         case 0x01: // PUSH8
-            let imm = Int64(Int8(bitPattern: memory.read8(pc))); pc &+= 1
+            let imm = Int64(Int8(bitPattern: try memory.read8(pc))); pc &+= 1
             try dpush(UInt64(bitPattern: imm))
         case 0x02: // PUSH16
-            let imm = Int64(Int16(bitPattern: memory.read16(pc))); pc &+= 2
+            let imm = Int64(Int16(bitPattern: try memory.read16(pc))); pc &+= 2
             try dpush(UInt64(bitPattern: imm))
         case 0x03: // PUSH32
-            let imm = Int64(Int32(bitPattern: memory.read32(pc))); pc &+= 4
+            let imm = Int64(Int32(bitPattern: try memory.read32(pc))); pc &+= 4
             try dpush(UInt64(bitPattern: imm))
         case 0x04: // PUSH64
-            let imm = memory.read64(pc); pc &+= 8
+            let imm = try memory.read64(pc); pc &+= 8
             try dpush(imm)
         case 0x05: // POP
             _ = try dpop()
         case 0x06: // POPN
-            let n = memory.read8(pc); pc &+= 1
+            let n = try memory.read8(pc); pc &+= 1
             for _ in 0..<n { _ = try dpop() }
         case 0x07: // DUP
             let a = try dpop(); try dpush(a); try dpush(a)
@@ -163,11 +144,11 @@ final class NovaCPU {
             let a = try dpop(); let b = try dpop()
             try dpush(a); try dpush(b); try dpush(a)
         case 0x0E: // PICK n
-            let n = memory.read8(pc); pc &+= 1
+            let n = try memory.read8(pc); pc &+= 1
             let addr = dsp &+ UInt64(n) &* 8
-            try dpush(memory.read64(addr))
+            try dpush(try memory.read64(addr))
         case 0x0F: // ROLL n — rotate top n items (top goes to bottom of the n)
-            let n = Int(memory.read8(pc)); pc &+= 1
+            let n = Int(try memory.read8(pc)); pc &+= 1
             if n > 1 {
                 var tmp = [UInt64]()
                 for _ in 0..<n { tmp.append(try dpop()) }
@@ -184,7 +165,7 @@ final class NovaCPU {
         case 0x13: // FPGET
             try dpush(fp)
         case 0x14: // ENTER n
-            let n = memory.read8(pc); pc &+= 1
+            let n = try memory.read8(pc); pc &+= 1
             try cpush(fp)
             fp = dsp
             for _ in 0..<n { try dpush(0) }
@@ -192,21 +173,21 @@ final class NovaCPU {
             dsp = fp
             fp = try cpop()
         case 0x16: // LOADL n — local n lives at FP-8*(n+1)
-            let n = memory.read8(pc); pc &+= 1
-            try dpush(memory.read64(fp &- (UInt64(n) &+ 1) &* 8))
+            let n = try memory.read8(pc); pc &+= 1
+            try dpush(try memory.read64(fp &- (UInt64(n) &+ 1) &* 8))
         case 0x17: // STORL n
-            let n = memory.read8(pc); pc &+= 1
+            let n = try memory.read8(pc); pc &+= 1
             let v = try dpop()
-            memory.write64(fp &- (UInt64(n) &+ 1) &* 8, v)
+            try memory.write64(fp &- (UInt64(n) &+ 1) &* 8, v)
         case 0x18: // LOADARG n — arg n above frame: FP+8*n (0 = last pushed)
-            let n = memory.read8(pc); pc &+= 1
-            try dpush(memory.read64(fp &+ UInt64(n) &* 8))
+            let n = try memory.read8(pc); pc &+= 1
+            try dpush(try memory.read64(fp &+ UInt64(n) &* 8))
         case 0x19: // PUSHR n — push R[n]
-            let n = memory.read8(pc); pc &+= 1
+            let n = try memory.read8(pc); pc &+= 1
             guard n < 16 else { tval = UInt64(n); throw NovaTrap.illegalInstruction }
             try dpush(regs[Int(n)])
         case 0x1A: // POPR n — pop into R[n]
-            let n = memory.read8(pc); pc &+= 1
+            let n = try memory.read8(pc); pc &+= 1
             guard n < 16 else { tval = UInt64(n); throw NovaTrap.illegalInstruction }
             regs[Int(n)] = try dpop()
         case 0x1B: // PUSHALL — push R0..R15 (R0 first, R15 on top)
@@ -309,46 +290,46 @@ final class NovaCPU {
         // ---- Memory ----
         case 0x80: // LOAD8
             let addr = try dpop()
-            try dpush(UInt64(bitPattern: Int64(Int8(bitPattern: memory.read8(addr)))))
+            try dpush(UInt64(bitPattern: Int64(Int8(bitPattern: try memory.read8(addr)))))
         case 0x83: // LOAD64
             let addr = try dpop()
-            try dpush(memory.read64(addr))
+            try dpush(try memory.read64(addr))
         case 0x84: // LOADU8
-            try dpush(UInt64(memory.read8(try dpop())))
+            try dpush(UInt64(try memory.read8(try dpop())))
         case 0x85: // LOADU16
             let addr85 = try dpop()
-            try dpush(UInt64(memory.read16(addr85)))
+            try dpush(UInt64(try memory.read16(addr85)))
         case 0x86: // LOADU32
             let addr86 = try dpop()
-            try dpush(UInt64(memory.read32(addr86)))
+            try dpush(UInt64(try memory.read32(addr86)))
         case 0x8A: // STORE64
             let addr = try dpop(); let v = try dpop()
-            memory.write64(addr, v)
+            try memory.write64(addr, v)
         case 0x8F: // MEMCPY: n dst src →  (src top)
             let src = try dpop(); let dst = try dpop(); let n = try dpop()
             memory.copyBytes(from: src, to: dst, count: n)
 
         // ---- Control flow ----
         case 0xA0: // JMP off16
-            let off = Int64(Int16(bitPattern: memory.read16(pc))); pc &+= 2
+            let off = Int64(Int16(bitPattern: try memory.read16(pc))); pc &+= 2
             pc = UInt64(Int64(bitPattern: pc) &+ off)
         case 0xA1: // JMP32
-            let off = Int64(Int32(bitPattern: memory.read32(pc))); pc &+= 4
+            let off = Int64(Int32(bitPattern: try memory.read32(pc))); pc &+= 4
             pc = UInt64(Int64(bitPattern: pc) &+ off)
         case 0xA2: // BZ
-            let off = Int64(Int16(bitPattern: memory.read16(pc))); pc &+= 2
+            let off = Int64(Int16(bitPattern: try memory.read16(pc))); pc &+= 2
             if (try dpop()) == 0 { pc = UInt64(Int64(bitPattern: pc) &+ off) }
         case 0xA3: // BNZ
-            let off = Int64(Int16(bitPattern: memory.read16(pc))); pc &+= 2
+            let off = Int64(Int16(bitPattern: try memory.read16(pc))); pc &+= 2
             if (try dpop()) != 0 { pc = UInt64(Int64(bitPattern: pc) &+ off) }
         case 0xA6: // BEQ (uses Z flag)
-            let off = Int64(Int16(bitPattern: memory.read16(pc))); pc &+= 2
+            let off = Int64(Int16(bitPattern: try memory.read16(pc))); pc &+= 2
             if flagZ { pc = UInt64(Int64(bitPattern: pc) &+ off) }
         case 0xA7: // BNE
-            let off = Int64(Int16(bitPattern: memory.read16(pc))); pc &+= 2
+            let off = Int64(Int16(bitPattern: try memory.read16(pc))); pc &+= 2
             if !flagZ { pc = UInt64(Int64(bitPattern: pc) &+ off) }
         case 0xA8: // CALL off16
-            let off = Int64(Int16(bitPattern: memory.read16(pc))); pc &+= 2
+            let off = Int64(Int16(bitPattern: try memory.read16(pc))); pc &+= 2
             try cpush(pc)
             pc = UInt64(Int64(bitPattern: pc) &+ off)
         case 0xAB: // RET
@@ -360,12 +341,12 @@ final class NovaCPU {
             try cpush(pc)
             pc = addr
         case 0xAD: // LOOP off16 — decrement top; if != 0 branch (keeps counter)
-            let off = Int64(Int16(bitPattern: memory.read16(pc))); pc &+= 2
+            let off = Int64(Int16(bitPattern: try memory.read16(pc))); pc &+= 2
             let n = try dpop() &- 1
             try dpush(n)
             if n != 0 { pc = UInt64(Int64(bitPattern: pc) &+ off) }
         case 0xAE: // TRAP code
-            let code = memory.read8(pc); pc &+= 1
+            let code = try memory.read8(pc); pc &+= 1
             tval = UInt64(code)
             throw NovaTrap.breakpoint // generic software trap
 

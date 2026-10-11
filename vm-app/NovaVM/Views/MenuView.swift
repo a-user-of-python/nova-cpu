@@ -46,8 +46,8 @@ struct MenuView: View {
                                 showingFirmwarePicker = true
                             }
                             .font(.headline)
-                            if let url = engine.customFirmwareURL {
-                                Text(url.lastPathComponent)
+                            if let name = engine.customFirmwareName {
+                                Text(name)
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -152,7 +152,21 @@ struct MenuView: View {
         do {
             let urls = try result.get()
             guard let url = urls.first else { return }
-            engine.customFirmwareURL = url
+            // SECURITY: Read the firmware NOW while we hold security-scoped access.
+            // Storing the URL alone is unsafe — the scope expires when this
+            // completion handler returns, and later reads would be denied.
+            guard url.startAccessingSecurityScopedResource() else {
+                errorMessage = "Could not access the firmware file."
+                return
+            }
+            defer { url.stopAccessingSecurityScopedResource() }
+            let data = try Data(contentsOf: url)
+            guard data.count <= 1024 * 1024 else {
+                errorMessage = "Firmware image exceeds 1MB."
+                return
+            }
+            engine.customFirmwareData = data
+            engine.customFirmwareName = url.lastPathComponent
         } catch {
             errorMessage = error.localizedDescription
         }

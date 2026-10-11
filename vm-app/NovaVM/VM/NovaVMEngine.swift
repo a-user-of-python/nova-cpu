@@ -22,7 +22,9 @@ final class NovaVMEngine: ObservableObject {
     // Firmware toggle
     @Published var useFirmware: Bool = true
     @Published var useCustomFirmware: Bool = false
-    var customFirmwareURL: URL?
+    // Firmware bytes are copied at pick time (security-scoped URLs expire).
+    var customFirmwareData: Data?
+    var customFirmwareName: String?
 
     // Memory size chosen by user (default 64MB)
     let memorySize: Int
@@ -79,8 +81,8 @@ final class NovaVMEngine: ObservableObject {
         guard data.count < memorySize / 2 else { throw NovaError.programTooLarge }
         if useFirmware {
             let fw: Data
-            if useCustomFirmware, let url = customFirmwareURL {
-                fw = try NovaFirmware.loadCustom(from: url)
+            if useCustomFirmware, let custom = customFirmwareData {
+                fw = custom
             } else {
                 fw = NovaFirmware.defaultImage
             }
