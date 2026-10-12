@@ -13,6 +13,7 @@ struct MenuView: View {
     @State private var errorMessage: String?
     @State private var programName: String?
     @State private var folderPrograms: [String] = []
+    @State private var folderFirmwares: [String] = []
 
     var body: some View {
         NavigationView {
@@ -49,12 +50,52 @@ struct MenuView: View {
                         .padding(.horizontal, 20)
 
                         if engine.useCustomFirmware {
-                            Button("Choose Firmware File…") {
+                            // Firmware list from NOVA/firmware/ folder
+                            HStack {
+                                Text("Firmware Files")
+                                    .font(.headline)
+                                Spacer()
+                                Button(action: { refreshFirmwares() }) {
+                                    Image(systemName: "arrow.clockwise")
+                                }
+                            }
+                            .padding(.horizontal, 20)
+
+                            Text("Drop .bin files in Files → NovaVM → NOVA → firmware")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 20)
+
+                            if folderFirmwares.isEmpty {
+                                Text("No firmware files yet")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            } else {
+                                ForEach(folderFirmwares, id: \.self) { name in
+                                    Button(action: { loadFirmwareFromFolder(name) }) {
+                                        HStack {
+                                            Image(systemName: "cpu")
+                                            Text(name)
+                                                .font(.headline)
+                                                .lineLimit(1)
+                                            Spacer()
+                                            if engine.customFirmwareName == name {
+                                                Image(systemName: "checkmark")
+                                                    .foregroundColor(.accentColor)
+                                            }
+                                        }
+                                        .padding(.horizontal, 20)
+                                        .padding(.vertical, 8)
+                                    }
+                                }
+                            }
+
+                            Button("Choose Firmware File… (picker)") {
                                 showingFirmwarePicker = true
                             }
-                            .font(.headline)
+                            .font(.subheadline)
                             if let name = engine.customFirmwareName {
-                                Text(name)
+                                Text("Selected: \(name)")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -186,7 +227,35 @@ struct MenuView: View {
             }
             .onAppear {
                 refreshPrograms()
+                refreshFirmwares()
             }
+        }
+    }
+
+    /// List .bin files in NOVA/firmware/ (Files app → NovaVM → NOVA → firmware)
+    private func refreshFirmwares() {
+        let fm = FileManager.default
+        let files = (try? fm.contentsOfDirectory(at: NovaFolders.firmwareDir,
+            includingPropertiesForKeys: nil)) ?? []
+        folderFirmwares = files
+            .filter { $0.pathExtension.lowercased() == "bin" }
+            .map { $0.lastPathComponent }
+            .sorted()
+    }
+
+    /// Load firmware directly from the NOVA/firmware folder (no picker).
+    private func loadFirmwareFromFolder(_ name: String) {
+        let url = NovaFolders.firmwareDir.appendingPathComponent(name)
+        do {
+            let data = try Data(contentsOf: url)
+            guard data.count <= 1_048_576 else {
+                errorMessage = "Firmware image exceeds 1MB."
+                return
+            }
+            engine.customFirmwareData = data
+            engine.customFirmwareName = name
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
