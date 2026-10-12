@@ -198,6 +198,7 @@ final class NovaVMEngine: ObservableObject {
         cpu.running = false
         isRunning = false
         statusLine = "Stopped"
+        snapshotRegisters()
     }
 
     func reset() {

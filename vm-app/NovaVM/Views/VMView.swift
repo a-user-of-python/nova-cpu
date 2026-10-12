@@ -100,6 +100,9 @@ struct VMView: View {
                 RegisterGrid(engine: engine)
                     .padding(.horizontal)
                     .padding(.bottom, 8)
+                    .onAppear {
+                        engine.snapshotRegisters()
+                    }
             }
 
             // Console
