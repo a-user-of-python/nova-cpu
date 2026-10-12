@@ -34,23 +34,23 @@ final class NovaVMEngine: ObservableObject {
 
     init() {
         // Launch log for crash diagnosis (visible in Files app)
-        logLaunch("init start")
+        Self.logLaunch("init start")
         // Set up the on-device folder structure first.
         NovaFolders.setup()
-        logLaunch("folders ok")
+        Self.logLaunch("folders ok")
         let cfg = NovaFolders.loadOrCreateConfig()
-        logLaunch("config ok: \(cfg.ramMB)MB")
+        Self.logLaunch("config ok: \(cfg.ramMB)MB")
         self.config = cfg
         let ramBytes = cfg.ramMB * 1024 * 1024
         self.memorySize = ramBytes
-        logLaunch("allocating \(ramBytes) bytes")
+        Self.logLaunch("allocating \(ramBytes) bytes")
         self.memory = NovaMemory(totalSize: ramBytes)
-        logLaunch("memory ok")
+        Self.logLaunch("memory ok")
         cpu.memory = memory
 
         // Wire stack pointers
         resetCPUState()
-        logLaunch("cpu state ok")
+        Self.logLaunch("cpu state ok")
 
         // Trap handler: report and halt
         cpu.trapHandler = { [weak self] trap, tval in
@@ -76,7 +76,8 @@ final class NovaVMEngine: ObservableObject {
     }
 
     /// Writes to NOVA/launch.log in Documents (visible in Files app).
-    private func logLaunch(_ msg: String) {
+    /// Static so it can be called before all properties are initialized.
+    private static func logLaunch(_ msg: String) {
         let url = NovaFolders.root.appendingPathComponent("launch.log")
         let line = "[\(Date())] \(msg)\n"
         if let data = line.data(using: .utf8) {
