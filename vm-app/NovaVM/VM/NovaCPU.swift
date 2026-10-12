@@ -302,6 +302,19 @@ final class NovaCPU {
         case 0x86: // LOADU32
             let addr86 = try dpop()
             try dpush(UInt64(try memory.read32(addr86)))
+        case 0x87: // STORE8
+            let addr87 = try dpop(); let v87 = try dpop()
+            if addr87 == NovaMemory.consoleAddr {
+                memory.mmioWrite(addr87, v87)
+            } else {
+                try memory.write8(addr87, UInt8(v87 & 0xFF))
+            }
+        case 0x88: // STORE16
+            let addr88 = try dpop(); let v88 = try dpop()
+            try memory.write16(addr88, UInt16(v88 & 0xFFFF))
+        case 0x89: // STORE32
+            let addr89 = try dpop(); let v89 = try dpop()
+            try memory.write32(addr89, UInt32(v89 & 0xFFFFFFFF))
         case 0x8A: // STORE64
             let addr = try dpop(); let v = try dpop()
             try memory.write64(addr, v)
