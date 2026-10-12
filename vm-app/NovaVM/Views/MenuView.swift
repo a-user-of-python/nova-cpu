@@ -16,32 +16,37 @@ struct MenuView: View {
 
     var body: some View {
         NavigationView {
-            VStack(spacing: 28) {
-                // Title
-                Text("NOVA")
-                    .font(.system(size: 64, weight: .bold, design: .monospaced))
-                    .padding(.top, 40)
-                Text("Stack-machine VM")
-                    .font(.title3)
-                    .foregroundColor(.secondary)
-
-                Spacer()
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Title — scales down on narrow screens
+                    Text("NOVA")
+                        .font(.system(size: 48, weight: .bold, design: .monospaced))
+                        .minimumScaleFactor(0.5)
+                        .lineLimit(1)
+                        .padding(.top, 20)
+                    Text("Stack-machine VM")
+                        .font(.title3)
+                        .foregroundColor(.secondary)
 
                 // Firmware toggle — the centerpiece
                 VStack(spacing: 12) {
                     Toggle(isOn: $engine.useFirmware) {
                         Text("Use Firmware")
-                            .font(.title2)
+                            .font(.headline)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                     }
                     .toggleStyle(SwitchToggleStyle(tint: .accentColor))
-                    .padding(.horizontal, 40)
+                    .padding(.horizontal, 20)
 
                     if engine.useFirmware {
                         Toggle(isOn: $engine.useCustomFirmware) {
                             Text("Custom firmware")
                                 .font(.headline)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
                         }
-                        .padding(.horizontal, 40)
+                        .padding(.horizontal, 20)
 
                         if engine.useCustomFirmware {
                             Button("Choose Firmware File…") {
@@ -136,18 +141,22 @@ struct MenuView: View {
                 .disabled(programName == nil)
                 .padding(.horizontal, 24)
 
-                Spacer()
-
                 Text(engine.statusLine)
                     .font(.footnote)
                     .foregroundColor(.secondary)
 
-                // Settings
+                // Settings — always visible, no Spacer pushing it off
                 Button(action: { showingSettings = true }) {
                     Label("Settings", systemImage: "gear")
-                        .font(.headline)
+                        .font(.title2)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(12)
                 }
+                .padding(.horizontal, 24)
                 .padding(.bottom, 20)
+                }
             }
             .navigationBarHidden(true)
             .fileImporter(
