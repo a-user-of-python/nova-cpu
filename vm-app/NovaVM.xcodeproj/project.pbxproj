@@ -21,16 +21,16 @@
 
 /* Begin PBXFileReference section */
 A30000000000000000000001 /* NovaVM.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NovaVM.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		6EEC3EED87A9FD58C6DA4CB8 /* NovaVMApp.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/NovaVMApp.swift; sourceTree = "<group>"; };
-		DD815AFB60ADD587BCCE4E2A /* NovaCPU.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/VM/NovaCPU.swift; sourceTree = "<group>"; };
-		8271DF7CD81E70420B883491 /* NovaMemory.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/VM/NovaMemory.swift; sourceTree = "<group>"; };
-		85BBAB6853269926CC6531A8 /* NovaFirmware.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/VM/NovaFirmware.swift; sourceTree = "<group>"; };
-		91A148C0ADC276D966184D92 /* NovaVMEngine.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/VM/NovaVMEngine.swift; sourceTree = "<group>"; };
-		841C33FB64A21B15DC60786C /* NovaConfig.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/VM/NovaConfig.swift; sourceTree = "<group>"; };
-		F4F2F09D554FDCF98207ADA9 /* DeviceInfo.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/VM/DeviceInfo.swift; sourceTree = "<group>"; };
-		37EB37DBDE17089498DB1D0F /* MenuView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/Views/MenuView.swift; sourceTree = "<group>"; };
-		2CD41DC2CD6FF9A1C4BF88B2 /* VMView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/Views/VMView.swift; sourceTree = "<group>"; };
-		7EE3BAF3E506D5D0360BC554 /* SettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/Views/SettingsView.swift; sourceTree = "<group>"; };
+		6EEC3EED87A9FD58C6DA4CB8 /* NovaVMApp.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVMApp.swift; sourceTree = "<group>"; };
+		DD815AFB60ADD587BCCE4E2A /* NovaCPU.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/NovaCPU.swift; sourceTree = "<group>"; };
+		8271DF7CD81E70420B883491 /* NovaMemory.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/NovaMemory.swift; sourceTree = "<group>"; };
+		85BBAB6853269926CC6531A8 /* NovaFirmware.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/NovaFirmware.swift; sourceTree = "<group>"; };
+		91A148C0ADC276D966184D92 /* NovaVMEngine.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/NovaVMEngine.swift; sourceTree = "<group>"; };
+		841C33FB64A21B15DC60786C /* NovaConfig.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/NovaConfig.swift; sourceTree = "<group>"; };
+		F4F2F09D554FDCF98207ADA9 /* DeviceInfo.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/DeviceInfo.swift; sourceTree = "<group>"; };
+		37EB37DBDE17089498DB1D0F /* MenuView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Views/MenuView.swift; sourceTree = "<group>"; };
+		2CD41DC2CD6FF9A1C4BF88B2 /* VMView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Views/VMView.swift; sourceTree = "<group>"; };
+		7EE3BAF3E506D5D0360BC554 /* SettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Views/SettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
