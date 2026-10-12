@@ -95,6 +95,7 @@ A30000000000000000000001 /* NovaVM.app */ = {isa = PBXFileReference; explicitFil
 				A20000000000000000000010 /* Sources */,
 				A20000000000000000000011 /* Frameworks */,
 				A20000000000000000000012 /* Resources */,
+				A20000000000000000000013 /* Inject File Sharing */,
 			);
 			buildRules = (
 			);
@@ -106,6 +107,23 @@ A30000000000000000000001 /* NovaVM.app */ = {isa = PBXFileReference; explicitFil
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A20000000000000000000013 /* Inject File Sharing */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Inject File Sharing";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "/usr/libexec/PlistBuddy -c \"Add :UIFileSharingEnabled bool true\" \"$TARGET_BUILD_DIR/$INFOPLIST_PATH\" 2>/dev/null || /usr/libexec/PlistBuddy -c \"Set :UIFileSharingEnabled true\" \"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXProject section */
 		A10000000000000000000001 /* Project object */ = {
@@ -288,8 +306,7 @@ A30000000000000000000001 /* NovaVM.app */ = {isa = PBXFileReference; explicitFil
 				ENABLE_PREVIEWS = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = NovaVM/Info.plist;
+				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = NOVA;
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_UIFileSharingEnabled = YES;
@@ -326,8 +343,7 @@ A30000000000000000000001 /* NovaVM.app */ = {isa = PBXFileReference; explicitFil
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = NovaVM/Info.plist;
+				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = NOVA;
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_UIFileSharingEnabled = YES;
