@@ -15,7 +15,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "48BB24C931BF459F62813A08"
+               BlueprintIdentifier = "000000000000000000001007"
                BuildableName = "NovaVM.app"
                BlueprintName = "NovaVM"
                ReferencedContainer = "container:NovaVM.xcodeproj">
