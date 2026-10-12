@@ -194,7 +194,9 @@ final class NovaVMEngine: ObservableObject {
         let shared = NovaFolders.sharedDir
         switch cmd {
         case 1: // LIST
-            let bufAddr = arg0, bufSize = Int(arg1)
+            let bufAddr = arg0
+            // Safe conversion: clamp to reasonable max to avoid Int overflow trap
+            let bufSize = Int(min(arg1, 1_000_000))
             guard bufSize > 0 else { return 0 }
             let fm = FileManager.default
             guard let names = try? fm.contentsOfDirectory(atPath: shared.path) else { return -1 }
@@ -209,7 +211,8 @@ final class NovaVMEngine: ObservableObject {
             }
             return Int64(offset)
         case 2: // READ
-            let pathAddr = arg0, bufAddr = arg1, bufSize = Int(arg2)
+            let pathAddr = arg0, bufAddr = arg1
+            let bufSize = Int(min(arg2, 10_000_000)) // clamp to 10MB max
             guard bufSize > 0 else { return 0 }
             // Read null-terminated path from guest memory
             var pathBytes: [UInt8] = []
