@@ -307,7 +307,7 @@ final class NovaCPU {
             try memory.write64(addr, v)
         case 0x8F: // MEMCPY: n dst src →  (src top)
             let src = try dpop(); let dst = try dpop(); let n = try dpop()
-            memory.copyBytes(from: src, to: dst, count: n)
+            try memory.copyBytes(from: src, to: dst, count: n)
 
         // ---- Control flow ----
         case 0xA0: // JMP off16

@@ -122,7 +122,7 @@ final class NovaMemory {
             throw NovaTrap.loadAccessFault
         }
         let n = Int(count)
-        bytes.withContiguousMutableStorage { buf in
+        bytes.withUnsafeMutableBufferPointer { buf in
             guard let base = buf.baseAddress else { return }
             memmove(base + Int(dst), base + Int(src), n)
         }
@@ -134,9 +134,9 @@ final class NovaMemory {
         guard address < sizeU64 else { throw NovaTrap.loadAccessFault }
         let n = min(data.count, Int(sizeU64 - address))
         guard n > 0 else { return }
-        data.withUnsafeBytes { src in
+        data.withUnsafeBytes { (src: UnsafeRawBufferPointer) in
             guard let sp = src.baseAddress else { return }
-            bytes.withContiguousMutableStorage { dst in
+            bytes.withUnsafeMutableBufferPointer { dst in
                 guard let dp = dst.baseAddress else { return }
                 memcpy(dp + Int(address), sp, n)
             }
