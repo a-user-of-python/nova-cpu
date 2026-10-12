@@ -12,7 +12,7 @@ final class NovaVMEngine: ObservableObject {
     @Published var statusLine: String = "Idle"
 
     private let cpu = NovaCPU()
-    private var memory: NovaMemory
+    var memory: NovaMemory
     private var runThread: Thread?
 
     // Live configuration (from NOVA/config.nova)
@@ -47,6 +47,11 @@ final class NovaVMEngine: ObservableObject {
         self.memory = NovaMemory(totalSize: ramBytes)
         Self.logLaunch("memory ok")
         cpu.memory = memory
+
+        // Wire up file MMIO handler for firmware (NovaShell)
+        memory.fileHandler = { [weak self] cmd, arg0, arg1, arg2 in
+            return self?.handleFileCommand(cmd, arg0: arg0, arg1: arg1, arg2: arg2) ?? -1
+        }
 
         // Wire stack pointers
         resetCPUState()
@@ -106,6 +111,9 @@ final class NovaVMEngine: ObservableObject {
             // but we swap it live here.
             let newMem = NovaMemory(totalSize: ramBytes)
             newMem.consoleOutput = memory.consoleOutput
+            newMem.fileHandler = { [weak self] cmd, arg0, arg1, arg2 in
+                return self?.handleFileCommand(cmd, arg0: arg0, arg1: arg1, arg2: arg2) ?? -1
+            }
             self.memory = newMem
             cpu.memory = newMem
             self.memorySize = ramBytes
@@ -175,6 +183,55 @@ final class NovaVMEngine: ObservableObject {
     func snapshotRegisters() {
         regSnapshot = cpu.regs
         spSnapshot = (cpu.dsp, cpu.csp, cpu.pc, cpu.fp)
+    }
+
+    // MARK: - Firmware File MMIO
+
+    /// Handle file commands from firmware. Runs on VM thread — keep it fast and safe.
+    /// cmd 1 = LIST: arg0=buffer addr, arg1=buffer size → returns bytes written
+    /// cmd 2 = READ: arg0=path addr (null-term), arg1=buffer addr, arg2=buffer size → returns bytes read or -1
+    private func handleFileCommand(_ cmd: UInt64, arg0: UInt64, arg1: UInt64, arg2: UInt64) -> Int64 {
+        let shared = NovaFolders.sharedDir
+        switch cmd {
+        case 1: // LIST
+            let bufAddr = arg0, bufSize = Int(arg1)
+            guard bufSize > 0 else { return 0 }
+            let fm = FileManager.default
+            guard let names = try? fm.contentsOfDirectory(atPath: shared.path) else { return -1 }
+            var offset = 0
+            for name in names.sorted() {
+                let bytes = Array(name.utf8) + [0] // null-terminated
+                guard offset + bytes.count <= bufSize else { break }
+                for (i, b) in bytes.enumerated() {
+                    try? memory.write8(bufAddr + UInt64(offset + i), b)
+                }
+                offset += bytes.count
+            }
+            return Int64(offset)
+        case 2: // READ
+            let pathAddr = arg0, bufAddr = arg1, bufSize = Int(arg2)
+            guard bufSize > 0 else { return 0 }
+            // Read null-terminated path from guest memory
+            var pathBytes: [UInt8] = []
+            var p = pathAddr
+            for _ in 0..<256 { // max path len
+                guard let b = try? memory.read8(p) else { break }
+                if b == 0 { break }
+                pathBytes.append(b)
+                p += 1
+            }
+            guard let filename = String(bytes: pathBytes, encoding: .utf8),
+                  !filename.contains(".."), !filename.contains("/") else { return -1 }
+            let url = shared.appendingPathComponent(filename)
+            guard let data = try? Data(contentsOf: url) else { return -1 }
+            let n = min(data.count, bufSize)
+            for i in 0..<n {
+                try? memory.write8(bufAddr + UInt64(i), data[i])
+            }
+            return Int64(n)
+        default:
+            return -1
+        }
     }
 
     /// Live register updates while running (4x/sec). Only active when panel visible.

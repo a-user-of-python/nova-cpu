@@ -293,9 +293,18 @@ final class NovaCPU {
             try dpush(UInt64(bitPattern: Int64(Int8(bitPattern: try memory.read8(addr)))))
         case 0x83: // LOAD64
             let addr = try dpop()
-            try dpush(try memory.read64(addr))
+            if addr >= 0xFFFF_FFFF_FFFF_0000 {
+                try dpush(memory.mmioRead(addr))
+            } else {
+                try dpush(try memory.read64(addr))
+            }
         case 0x84: // LOADU8
-            try dpush(UInt64(try memory.read8(try dpop())))
+            let addr84 = try dpop()
+            if addr84 >= 0xFFFF_FFFF_FFFF_0000 {
+                try dpush(memory.mmioRead(addr84) & 0xFF)
+            } else {
+                try dpush(UInt64(try memory.read8(addr84)))
+            }
         case 0x85: // LOADU16
             let addr85 = try dpop()
             try dpush(UInt64(try memory.read16(addr85)))
@@ -304,8 +313,8 @@ final class NovaCPU {
             try dpush(UInt64(try memory.read32(addr86)))
         case 0x87: // STORE8
             let addr87 = try dpop(); let v87 = try dpop()
-            if addr87 == NovaMemory.consoleAddr {
-                memory.mmioWrite(addr87, v87)
+            if addr87 >= 0xFFFF_FFFF_FFFF_0000 {
+                memory.mmioWrite(addr87, v87 & 0xFF)
             } else {
                 try memory.write8(addr87, UInt8(v87 & 0xFF))
             }
@@ -317,7 +326,11 @@ final class NovaCPU {
             try memory.write32(addr89, UInt32(v89 & 0xFFFFFFFF))
         case 0x8A: // STORE64
             let addr = try dpop(); let v = try dpop()
-            try memory.write64(addr, v)
+            if addr >= 0xFFFF_FFFF_FFFF_0000 {
+                memory.mmioWrite(addr, v)
+            } else {
+                try memory.write64(addr, v)
+            }
         case 0x8F: // MEMCPY: n dst src →  (src top)
             let src = try dpop(); let dst = try dpop(); let n = try dpop()
             try memory.copyBytes(from: src, to: dst, count: n)

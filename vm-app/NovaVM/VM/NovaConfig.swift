@@ -54,12 +54,13 @@ enum NovaFolders {
     }
     static var firmwareDir: URL { root.appendingPathComponent("firmware", isDirectory: true) }
     static var programsDir: URL { root.appendingPathComponent("programs", isDirectory: true) }
+    static var sharedDir: URL { root.appendingPathComponent("shared", isDirectory: true) }
     static var configFile: URL { root.appendingPathComponent("config.nova") }
 
     /// Create the folder structure on first launch. Idempotent.
     static func setup() {
         let fm = FileManager.default
-        for dir in [root, firmwareDir, programsDir] {
+        for dir in [root, firmwareDir, programsDir, sharedDir] {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
         // Seed a README so the folders aren't empty/mysterious.
@@ -78,6 +79,14 @@ enum NovaFolders {
             You can also load programs from anywhere via the Files picker.
             Assemble .nova sources with: python3 novas.py program.nova -o program.bin
             """.write(to: progReadme, atomically: true, encoding: .utf8)
+        }
+        let sharedReadme = sharedDir.appendingPathComponent("README.txt")
+        if !fm.fileExists(atPath: sharedReadme.path) {
+            try? """
+            Shared folder accessible to NOVA firmware.
+            Drop any files here (MP3s, text, data) — firmware can read them via the file MMIO interface.
+            NovaShell commands: ls, cat <file>, run <program>
+            """.write(to: sharedReadme, atomically: true, encoding: .utf8)
         }
     }
 

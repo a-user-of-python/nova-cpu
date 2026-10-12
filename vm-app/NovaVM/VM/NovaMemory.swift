@@ -166,7 +166,26 @@ final class NovaMemory {
     // MARK: - Console I/O (memory-mapped)
 
     static let consoleAddr: UInt64 = 0xFFFF_FFFF_FFFF_0000
+    static let keyboardAddr: UInt64 = 0xFFFF_FFFF_FFFF_0008
+    static let fileCmdAddr: UInt64 = 0xFFFF_FFFF_FFFF_0010
+    static let fileArg0Addr: UInt64 = 0xFFFF_FFFF_FFFF_0018
+    static let fileArg1Addr: UInt64 = 0xFFFF_FFFF_FFFF_0020
+    static let fileArg2Addr: UInt64 = 0xFFFF_FFFF_FFFF_0028
+    static let fileResultAddr: UInt64 = 0xFFFF_FFFF_FFFF_0030
+
     var consoleOutput: ((String) -> Void)?
+
+    /// Keyboard input queue (host pushes keys, guest pops via MMIO read)
+    var keyboardQueue: [UInt8] = []
+
+    /// File operation handler (set by host)
+    var fileHandler: ((UInt64, UInt64, UInt64, UInt64) -> Int64)?
+
+    // File command args
+    private var fileArg0: UInt64 = 0
+    private var fileArg1: UInt64 = 0
+    private var fileArg2: UInt64 = 0
+    private var fileResult: Int64 = 0
 
     /// Buffer for assembling multi-byte UTF-8 sequences from MMIO writes.
     private var utf8Buffer = [UInt8]()
@@ -174,18 +193,42 @@ final class NovaMemory {
     func mmioWrite(_ addr: UInt64, _ v: UInt64) {
         if addr == Self.consoleAddr {
             utf8Buffer.append(UInt8(v & 0xFF))
-            // Only flush when we have complete UTF-8 sequences.
-            // Check: does the buffer decode cleanly AND not end mid-sequence?
             if isCompleteUTF8(utf8Buffer), let s = String(bytes: utf8Buffer, encoding: .utf8) {
                 utf8Buffer.removeAll()
                 consoleOutput?(s)
             } else if utf8Buffer.count > 8 {
-                // Safety: shouldn't happen, flush as-is
                 let s = String(bytes: utf8Buffer, encoding: .utf8) ?? ""
                 utf8Buffer.removeAll()
                 consoleOutput?(s)
             }
+        } else if addr == Self.fileCmdAddr {
+            // Execute file command synchronously
+            if let handler = fileHandler {
+                fileResult = handler(v, fileArg0, fileArg1, fileArg2)
+            } else {
+                fileResult = -1
+            }
+        } else if addr == Self.fileArg0Addr {
+            fileArg0 = v
+        } else if addr == Self.fileArg1Addr {
+            fileArg1 = v
+        } else if addr == Self.fileArg2Addr {
+            fileArg2 = v
         }
+    }
+
+    func mmioRead(_ addr: UInt64) -> UInt64 {
+        if addr == Self.keyboardAddr {
+            return keyboardQueue.isEmpty ? 0 : UInt64(keyboardQueue.removeFirst())
+        } else if addr == Self.fileResultAddr {
+            return UInt64(bitPattern: fileResult)
+        }
+        return 0
+    }
+
+    /// Host pushes a key for the guest to read
+    func pushKey(_ byte: UInt8) {
+        keyboardQueue.append(byte)
     }
 
     /// Returns true if bytes form complete UTF-8 sequences (not cut mid-character).

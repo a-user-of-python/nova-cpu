@@ -65,6 +65,7 @@ struct VMView: View {
     @ObservedObject var engine: NovaVMEngine
     @Environment(\.dismiss) private var dismiss
     @State private var showingRegisters = false
+    @State private var keyboardInput = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -134,6 +135,20 @@ struct VMView: View {
                 }
             }
 
+            // Keyboard input — sends keys to the VM (for firmware shells)
+            HStack {
+                TextField("Type here...", text: $keyboardInput, onCommit: {
+                    sendKeys()
+                })
+                .textFieldStyle(RoundedBorderTextFieldStyle())
+                .font(.system(size: 18))
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+                Button("Send") { sendKeys() }
+                    .font(.headline)
+            }
+            .padding(.horizontal)
+
             // Status bar
             Text(engine.statusLine)
                 .font(.footnote)
@@ -141,7 +156,17 @@ struct VMView: View {
                 .padding(8)
         }
     }
-}
+
+    private func sendKeys() {
+        for byte in keyboardInput.utf8 {
+            engine.memory.pushKey(byte)
+        }
+        // Send Enter key too
+        engine.memory.pushKey(10)
+        // Echo to console
+        engine.consoleText += keyboardInput + "\n"
+        keyboardInput = ""
+    }
 
 struct RegisterGrid: View {
     @ObservedObject var engine: NovaVMEngine
