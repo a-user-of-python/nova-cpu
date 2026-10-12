@@ -18,7 +18,7 @@ struct NovaConfig: Codable {
     var maxStepsPerRun: UInt64  // 0 = unlimited
 
     static let maxRAMMB = 1024  // 1GB hard cap
-    static let minRAMMB = 16
+    static let minRAMMB = 64    // 64MB minimum (stack layout needs headroom)
 
     static func `default`(maxCores: Int, pCores: Int, eCores: Int) -> NovaConfig {
         NovaConfig(

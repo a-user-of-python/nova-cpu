@@ -104,14 +104,16 @@ final class NovaVMEngine: ObservableObject {
     }
 
     private func resetCPUState() {
+        // Use wrapping arithmetic to avoid traps on unexpected layouts;
+        // NovaMemory guarantees the layout fits within the allocation.
         cpu.dsp = memory.dataStackBase
         cpu.csp = memory.callStackBase
         cpu.vsp = memory.vectorStackBase
-        cpu.esp = memory.vectorStackBase - 1024*1024
-        cpu.dslim = memory.dataStackBase - 8*1024*1024
-        cpu.cslim = memory.callStackBase - 8*1024*1024
-        cpu.eslim = cpu.esp - 1024*1024
-        cpu.vslim = memory.vectorStackBase - 8*1024*1024
+        cpu.esp = memory.vectorStackBase &- 1024*1024
+        cpu.dslim = memory.dataStackBase &- 8*1024*1024
+        cpu.cslim = memory.callStackBase &- 8*1024*1024
+        cpu.eslim = cpu.esp &- 1024*1024
+        cpu.vslim = memory.vectorStackBase &- 8*1024*1024
         cpu.fp = 0
         cpu.pc = 0
         // Machine privilege, interrupts on

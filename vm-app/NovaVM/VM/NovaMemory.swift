@@ -50,16 +50,19 @@ final class NovaMemory {
     static let maxTotalSize = 1024 * 1024 * 1024
 
     init(totalSize: Int = 64 * 1024 * 1024) {
-        // Clamp into [16MB, 1GB].
-        let clamped = min(max(totalSize, 16 * 1024 * 1024), Self.maxTotalSize)
+        // Clamp into [64MB, 1GB]. 64MB minimum ensures stack regions fit.
+        let clamped = min(max(totalSize, 64 * 1024 * 1024), Self.maxTotalSize)
         self.totalSize = clamped
         self.sizeU64 = UInt64(clamped)
         self.bytes = ContiguousArray<UInt8>(repeating: 0, count: clamped)
 
         let top = UInt64(clamped)
+        // Reserve stack space proportionally, capped at 8MB/16MB.
+        // For 64MB: reserve 4MB/8MB. For >=128MB: use full 8MB/16MB.
+        let reserveUnit = min(UInt64(8 * 1024 * 1024), top / 16)
         self.vectorStackBase = top
-        self.callStackBase   = top - 8 * 1024 * 1024
-        self.dataStackBase   = top - 16 * 1024 * 1024
+        self.callStackBase   = top &- reserveUnit
+        self.dataStackBase   = top &- (reserveUnit * 2)
     }
 
     // MARK: - Bounds-checked access (little-endian)
