@@ -117,8 +117,8 @@ enum NovaFolders {
         var cfg = NovaConfig.default(maxCores: info.totalCores, pCores: info.pCores, eCores: info.eCores)
         var seenRAM = false, seenCores = false
         for rawLine in text.components(separatedBy: .newlines) {
-            let line = rawLine.split(separator: "#", maxSplits: 1)[0]
-                .trimmingCharacters(in: .whitespaces)
+            guard let firstPart = rawLine.split(separator: "#", maxSplits: 1).first else { continue }
+            let line = firstPart.trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty, let eq = line.firstIndex(of: "=") else { continue }
             let key = line[..<eq].trimmingCharacters(in: .whitespaces).lowercased()
             let val = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
