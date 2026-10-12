@@ -12,6 +12,7 @@ struct MenuView: View {
     @State private var showingSettings = false
     @State private var errorMessage: String?
     @State private var programName: String?
+    @State private var folderPrograms: [String] = []
 
     var body: some View {
         NavigationView {
@@ -64,24 +65,60 @@ struct MenuView: View {
                 .cornerRadius(16)
                 .padding(.horizontal, 24)
 
-                // Program loading
+                // Program loading — direct from Files app folder
                 VStack(spacing: 12) {
+                    HStack {
+                        Text("Programs")
+                            .font(.title2).bold()
+                        Spacer()
+                        Button(action: { refreshPrograms() }) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.title3)
+                        }
+                    }
+                    .padding(.horizontal, 24)
+
+                    Text("Drop .bin files in Files → NovaVM → NOVA → programs")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 24)
+
+                    if folderPrograms.isEmpty {
+                        Text("No programs yet")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                            .padding()
+                    } else {
+                        ForEach(folderPrograms, id: \.self) { name in
+                            Button(action: { loadFromFolder(name) }) {
+                                HStack {
+                                    Image(systemName: "cpu")
+                                    Text(name)
+                                        .font(.headline)
+                                    Spacer()
+                                    if programName == name {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundColor(.green)
+                                    }
+                                }
+                                .padding()
+                                .background(Color(.secondarySystemBackground))
+                                .cornerRadius(10)
+                            }
+                            .padding(.horizontal, 24)
+                        }
+                    }
+
                     Button(action: { showingProgramPicker = true }) {
-                        Label("Load Program…", systemImage: "folder")
-                            .font(.title2)
+                        Label("Browse Files…", systemImage: "folder")
+                            .font(.headline)
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(Color.accentColor)
-                            .foregroundColor(.white)
+                            .background(Color(.tertiarySystemBackground))
                             .cornerRadius(12)
                     }
-                    if let name = programName {
-                        Text(name)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+                    .padding(.horizontal, 24)
                 }
-                .padding(.horizontal, 24)
 
                 // Run
                 Button(action: {
@@ -138,6 +175,32 @@ struct MenuView: View {
             .sheet(isPresented: $showingSettings) {
                 SettingsView(engine: engine)
             }
+            .onAppear {
+                refreshPrograms()
+            }
+        }
+    }
+
+    /// List .bin files in NOVA/programs/ (Files app → NovaVM → NOVA → programs)
+    private func refreshPrograms() {
+        let fm = FileManager.default
+        let files = (try? fm.contentsOfDirectory(at: NovaFolders.programsDir,
+            includingPropertiesForKeys: nil)) ?? []
+        folderPrograms = files
+            .filter { $0.pathExtension.lowercased() == "bin" }
+            .map { $0.lastPathComponent }
+            .sorted()
+    }
+
+    /// Load a program directly from the NOVA/programs folder (no picker).
+    private func loadFromFolder(_ name: String) {
+        let url = NovaFolders.programsDir.appendingPathComponent(name)
+        do {
+            let data = try Data(contentsOf: url)
+            try engine.loadProgram(data)
+            programName = name
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
