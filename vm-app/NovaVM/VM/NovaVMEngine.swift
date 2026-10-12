@@ -177,6 +177,27 @@ final class NovaVMEngine: ObservableObject {
         spSnapshot = (cpu.dsp, cpu.csp, cpu.pc, cpu.fp)
     }
 
+    /// Live register updates while running (4x/sec). Only active when panel visible.
+    var liveUpdateTimer: Timer?
+    var liveUpdatesEnabled = false
+
+    func startLiveUpdates() {
+        liveUpdatesEnabled = true
+        liveUpdateTimer?.invalidate()
+        liveUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            guard let self = self, self.liveUpdatesEnabled else { return }
+            // Snapshot on main thread (cpu.regs is simple array copy)
+            self.regSnapshot = self.cpu.regs
+            self.spSnapshot = (self.cpu.dsp, self.cpu.csp, self.cpu.pc, self.cpu.fp)
+        }
+    }
+
+    func stopLiveUpdates() {
+        liveUpdatesEnabled = false
+        liveUpdateTimer?.invalidate()
+        liveUpdateTimer = nil
+    }
+
     func start() {
         guard !cpu.running else { return }
         isRunning = true

@@ -102,6 +102,10 @@ struct VMView: View {
                     .padding(.bottom, 8)
                     .onAppear {
                         engine.snapshotRegisters()
+                        engine.startLiveUpdates()
+                    }
+                    .onDisappear {
+                        engine.stopLiveUpdates()
                     }
             }
 
@@ -152,12 +156,11 @@ struct RegisterGrid: View {
                 Text("Registers")
                     .font(.headline)
                 Spacer()
-                // Manual refresh — only meaningful when halted
+                // Manual refresh — snapshots immediately
                 Button(action: { engine.snapshotRegisters() }) {
                     Label("Refresh", systemImage: "arrow.clockwise")
                         .font(.caption)
                 }
-                .disabled(engine.isRunning)
             }
             // R0–R15 in a 4×4 grid
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 4) {
