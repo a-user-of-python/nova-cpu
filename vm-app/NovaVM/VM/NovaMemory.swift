@@ -168,10 +168,45 @@ final class NovaMemory {
     static let consoleAddr: UInt64 = 0xFFFF_FFFF_FFFF_0000
     var consoleOutput: ((String) -> Void)?
 
+    /// Buffer for assembling multi-byte UTF-8 sequences from MMIO writes.
+    private var utf8Buffer = [UInt8]()
+
     func mmioWrite(_ addr: UInt64, _ v: UInt64) {
         if addr == Self.consoleAddr {
-            let c = Character(UnicodeScalar(UInt8(v & 0xFF)))
-            consoleOutput?(String(c))
+            utf8Buffer.append(UInt8(v & 0xFF))
+            // Only flush when we have complete UTF-8 sequences.
+            // Check: does the buffer decode cleanly AND not end mid-sequence?
+            if isCompleteUTF8(utf8Buffer), let s = String(bytes: utf8Buffer, encoding: .utf8) {
+                utf8Buffer.removeAll()
+                consoleOutput?(s)
+            } else if utf8Buffer.count > 8 {
+                // Safety: shouldn't happen, flush as-is
+                let s = String(bytes: utf8Buffer, encoding: .utf8) ?? ""
+                utf8Buffer.removeAll()
+                consoleOutput?(s)
+            }
         }
+    }
+
+    /// Returns true if bytes form complete UTF-8 sequences (not cut mid-character).
+    private func isCompleteUTF8(_ bytes: [UInt8]) -> Bool {
+        var i = 0
+        while i < bytes.count {
+            let b = bytes[i]
+            let len: Int
+            if b < 0x80 { len = 1 }
+            else if b < 0xC2 { return false } // stray continuation
+            else if b < 0xE0 { len = 2 }
+            else if b < 0xF0 { len = 3 }
+            else if b < 0xF5 { len = 4 }
+            else { return false }
+            if i + len > bytes.count { return false } // incomplete
+            // Validate continuation bytes
+            for j in 1..<len {
+                if bytes[i+j] < 0x80 || bytes[i+j] > 0xBF { return false }
+            }
+            i += len
+        }
+        return true
     }
 }
