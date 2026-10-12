@@ -25,6 +25,7 @@ jobs:
       - name: Build NovaVM
         run: |
           cd vm-app
+          set -o pipefail
           xcodebuild -project NovaVM.xcodeproj \
             -scheme NovaVM \
             -configuration Release \
@@ -32,7 +33,17 @@ jobs:
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGN_IDENTITY="" 2>&1 | tee build.log
+          echo "EXIT_CODE=${PIPESTATUS[0]}" >> $GITHUB_ENV
+          exit ${PIPESTATUS[0]}
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: vm-app/build.log
+          if-no-files-found: warn
 
       - name: Package IPA
         run: |
