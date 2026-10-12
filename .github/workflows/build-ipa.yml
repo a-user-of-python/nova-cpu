@@ -50,6 +50,9 @@ jobs:
           VERSION="${{ github.event.inputs.version || github.ref_name }}"
           APP_PATH="vm-app/build/Build/Products/Release-iphoneos/NovaVM.app"
           test -d "$APP_PATH" || { echo "App not found at $APP_PATH"; exit 1; }
+          # Inject UIFileSharingEnabled (Xcode silently drops INFOPLIST_KEY_UIFileSharingEnabled)
+          /usr/libexec/PlistBuddy -c "Add :UIFileSharingEnabled bool true" "$APP_PATH/Info.plist" 2>/dev/null || /usr/libexec/PlistBuddy -c "Set :UIFileSharingEnabled true" "$APP_PATH/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :UIFileSharingEnabled" "$APP_PATH/Info.plist"
           rm -rf Payload NovaVM-*.ipa
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
