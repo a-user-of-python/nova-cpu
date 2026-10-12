@@ -108,7 +108,7 @@ struct VMView: View {
                     Group {
                         if engine.consoleText.isEmpty {
                             Text("No output yet.")
-                                .foregroundColor(.green)
+                                .foregroundColor(.white)
                         } else {
                             ANSIRenderer.render(engine.consoleText)
                         }
@@ -119,7 +119,7 @@ struct VMView: View {
                         .id("consoleEnd")
                 }
                 .background(Color.black)
-                .foregroundColor(Color.green)
+                .foregroundColor(Color.white)
                 .cornerRadius(12)
                 .padding(.horizontal)
                 .onChange(of: engine.consoleText) { _ in
