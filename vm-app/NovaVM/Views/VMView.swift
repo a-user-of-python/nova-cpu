@@ -167,6 +167,7 @@ struct VMView: View {
         engine.consoleText += keyboardInput + "\n"
         keyboardInput = ""
     }
+}
 
 struct RegisterGrid: View {
     @ObservedObject var engine: NovaVMEngine
