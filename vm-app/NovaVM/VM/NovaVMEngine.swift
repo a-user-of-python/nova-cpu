@@ -33,17 +33,24 @@ final class NovaVMEngine: ObservableObject {
     var memorySize: Int
 
     init() {
+        // Launch log for crash diagnosis (visible in Files app)
+        logLaunch("init start")
         // Set up the on-device folder structure first.
         NovaFolders.setup()
+        logLaunch("folders ok")
         let cfg = NovaFolders.loadOrCreateConfig()
+        logLaunch("config ok: \(cfg.ramMB)MB")
         self.config = cfg
         let ramBytes = cfg.ramMB * 1024 * 1024
         self.memorySize = ramBytes
+        logLaunch("allocating \(ramBytes) bytes")
         self.memory = NovaMemory(totalSize: ramBytes)
+        logLaunch("memory ok")
         cpu.memory = memory
 
         // Wire stack pointers
         resetCPUState()
+        logLaunch("cpu state ok")
 
         // Trap handler: report and halt
         cpu.trapHandler = { [weak self] trap, tval in
@@ -64,6 +71,23 @@ final class NovaVMEngine: ObservableObject {
                 if let t = self?.consoleText, t.count > 100_000 {
                     self?.consoleText = String(t.suffix(90_000))
                 }
+            }
+        }
+    }
+
+    /// Writes to NOVA/launch.log in Documents (visible in Files app).
+    private func logLaunch(_ msg: String) {
+        let url = NovaFolders.root.appendingPathComponent("launch.log")
+        let line = "[\(Date())] \(msg)\n"
+        if let data = line.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: url.path) {
+                if let fh = try? FileHandle(forWritingTo: url) {
+                    fh.seekToEndOfFile()
+                    fh.write(data)
+                    try? fh.close()
+                }
+            } else {
+                try? data.write(to: url)
             }
         }
     }

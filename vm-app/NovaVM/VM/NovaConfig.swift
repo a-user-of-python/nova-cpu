@@ -22,7 +22,7 @@ struct NovaConfig: Codable {
 
     static func `default`(maxCores: Int, pCores: Int, eCores: Int) -> NovaConfig {
         NovaConfig(
-            ramMB: 256,
+            ramMB: 64,
             cpuCores: min(4, maxCores),
             pCores: min(2, pCores),
             eCores: min(2, eCores),
