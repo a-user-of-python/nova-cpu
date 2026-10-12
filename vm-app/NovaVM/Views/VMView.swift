@@ -3,6 +3,64 @@
 
 import SwiftUI
 
+/// Parse ANSI escape codes into styled SwiftUI Text.
+struct ANSIRenderer {
+    static func render(_ text: String) -> Text {
+        var result = Text("")
+        var current = ""
+        var fg: Color? = nil
+        var bold = false
+        
+        var i = text.startIndex
+        while i < text.endIndex {
+            if text[i] == "\u{1B}" && text.index(after: i) < text.endIndex && text[text.index(after: i)] == "[" {
+                // Flush current segment
+                if !current.isEmpty {
+                    var t = Text(current)
+                    if let c = fg { t = t.foregroundColor(c) }
+                    if bold { t = t.bold() }
+                    result = result + t
+                    current = ""
+                }
+                // Parse escape sequence
+                var j = text.index(i, offsetBy: 2)
+                var codes = ""
+                while j < text.endIndex && text[j] != "m" {
+                    codes.append(text[j])
+                    j = text.index(after: j)
+                }
+                if j < text.endIndex { j = text.index(after: j) } // skip 'm'
+                
+                // Interpret codes
+                let parts = codes.split(separator: ";").map { String($0) }
+                if parts == ["0"] {
+                    fg = nil; bold = false
+                } else if parts == ["1"] {
+                    bold = true
+                } else if parts == ["2"] {
+                    fg = Color.gray // dim
+                } else if parts.count >= 5 && parts[0] == "38" && parts[1] == "2" {
+                    // 38;2;r;g;b foreground RGB
+                    if let r = Int(parts[2]), let g = Int(parts[3]), let b = Int(parts[4]) {
+                        fg = Color(red: Double(r)/255, green: Double(g)/255, blue: Double(b)/255)
+                    }
+                }
+                i = j
+            } else {
+                current.append(text[i])
+                i = text.index(after: i)
+            }
+        }
+        if !current.isEmpty {
+            var t = Text(current)
+            if let c = fg { t = t.foregroundColor(c) }
+            if bold { t = t.bold() }
+            result = result + t
+        }
+        return result
+    }
+}
+
 struct VMView: View {
     @ObservedObject var engine: NovaVMEngine
     @Environment(\.dismiss) private var dismiss
@@ -47,7 +105,14 @@ struct VMView: View {
             // Console
             ScrollViewReader { proxy in
                 ScrollView {
-                    Text(engine.consoleText.isEmpty ? "No output yet." : engine.consoleText)
+                    Group {
+                        if engine.consoleText.isEmpty {
+                            Text("No output yet.")
+                                .foregroundColor(.green)
+                        } else {
+                            ANSIRenderer.render(engine.consoleText)
+                        }
+                    }
                         .font(.system(size: 18, design: .monospaced))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding()
