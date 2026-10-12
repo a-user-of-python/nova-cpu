@@ -7,72 +7,80 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		000000000000000000001012 /* NovaVMApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000001013 /* NovaVMApp.swift */; };
-		000000000000000000001014 /* NovaCPU.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000001015 /* NovaCPU.swift */; };
-		000000000000000000001016 /* NovaMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000001017 /* NovaMemory.swift */; };
-		000000000000000000001018 /* NovaFirmware.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000001019 /* NovaFirmware.swift */; };
-		00000000000000000000101A /* NovaVMEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000101B /* NovaVMEngine.swift */; };
-		00000000000000000000101C /* NovaConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000101D /* NovaConfig.swift */; };
-		00000000000000000000101E /* DeviceInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00000000000000000000101F /* DeviceInfo.swift */; };
-		000000000000000000001020 /* MenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000001021 /* MenuView.swift */; };
-		000000000000000000001022 /* VMView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000001023 /* VMView.swift */; };
-		000000000000000000001024 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000001025 /* SettingsView.swift */; };
+		3886B7000F3BFF1552116492 /* NovaVMApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EEC3EED87A9FD58C6DA4CB8 /* NovaVMApp.swift */; };
+		20C0AEC545141B4D03071606 /* NovaCPU.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD815AFB60ADD587BCCE4E2A /* NovaCPU.swift */; };
+		E4C19325F56D4637FB35EC98 /* NovaMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8271DF7CD81E70420B883491 /* NovaMemory.swift */; };
+		94C4525BC721AAA0224EE8B2 /* NovaFirmware.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85BBAB6853269926CC6531A8 /* NovaFirmware.swift */; };
+		D00DE84F7B25C0E67479F283 /* NovaVMEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91A148C0ADC276D966184D92 /* NovaVMEngine.swift */; };
+		9678A5FD7888AD50510ECAC5 /* NovaConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 841C33FB64A21B15DC60786C /* NovaConfig.swift */; };
+		5A7F6FB5E2A3A141A810EEC9 /* DeviceInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4F2F09D554FDCF98207ADA9 /* DeviceInfo.swift */; };
+		32A6AD617CE34EC5C0827A70 /* MenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37EB37DBDE17089498DB1D0F /* MenuView.swift */; };
+		5F5B9D2EEADD9E28DDC5D588 /* VMView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CD41DC2CD6FF9A1C4BF88B2 /* VMView.swift */; };
+		020C6D4EF7A852700D0BCEE6 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EE3BAF3E506D5D0360BC554 /* SettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		000000000000000000001008 /* NovaVM.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NovaVM.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		000000000000000000001013 /* NovaVMApp.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVMApp.swift; sourceTree = "<group>"; };
-		000000000000000000001015 /* NovaCPU.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/NovaCPU.swift; sourceTree = "<group>"; };
-		000000000000000000001017 /* NovaMemory.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/NovaMemory.swift; sourceTree = "<group>"; };
-		000000000000000000001019 /* NovaFirmware.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/NovaFirmware.swift; sourceTree = "<group>"; };
-		00000000000000000000101B /* NovaVMEngine.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/NovaVMEngine.swift; sourceTree = "<group>"; };
-		00000000000000000000101D /* NovaConfig.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/NovaConfig.swift; sourceTree = "<group>"; };
-		00000000000000000000101F /* DeviceInfo.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/DeviceInfo.swift; sourceTree = "<group>"; };
-		000000000000000000001021 /* MenuView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Views/MenuView.swift; sourceTree = "<group>"; };
-		000000000000000000001023 /* VMView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Views/VMView.swift; sourceTree = "<group>"; };
-		000000000000000000001025 /* SettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Views/SettingsView.swift; sourceTree = "<group>"; };
+A30000000000000000000001 /* NovaVM.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NovaVM.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6EEC3EED87A9FD58C6DA4CB8 /* NovaVMApp.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/NovaVMApp.swift; sourceTree = "<group>"; };
+		DD815AFB60ADD587BCCE4E2A /* NovaCPU.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/VM/NovaCPU.swift; sourceTree = "<group>"; };
+		8271DF7CD81E70420B883491 /* NovaMemory.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/VM/NovaMemory.swift; sourceTree = "<group>"; };
+		85BBAB6853269926CC6531A8 /* NovaFirmware.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/VM/NovaFirmware.swift; sourceTree = "<group>"; };
+		91A148C0ADC276D966184D92 /* NovaVMEngine.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/VM/NovaVMEngine.swift; sourceTree = "<group>"; };
+		841C33FB64A21B15DC60786C /* NovaConfig.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/VM/NovaConfig.swift; sourceTree = "<group>"; };
+		F4F2F09D554FDCF98207ADA9 /* DeviceInfo.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/VM/DeviceInfo.swift; sourceTree = "<group>"; };
+		37EB37DBDE17089498DB1D0F /* MenuView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/Views/MenuView.swift; sourceTree = "<group>"; };
+		2CD41DC2CD6FF9A1C4BF88B2 /* VMView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/Views/VMView.swift; sourceTree = "<group>"; };
+		7EE3BAF3E506D5D0360BC554 /* SettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVM/Views/SettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		00000000000000000000100A /* Frameworks */ = {
+		A20000000000000000000011 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A30000000000000000000027 /* CarRenderer.swift in Sources */,
+				A30000000000000000000029 /* CommandBar.swift in Sources */,
+				A30000000000000000000031 /* CommandRegistry.swift in Sources */,
+				A30000000000000000000033 /* ControlShelf.swift in Sources */,
+				A30000000000000000000035 /* DebugPanel.swift in Sources */,
+				A30000000000000000000037 /* MainMenu.swift in Sources */,
+				A30000000000000000000039 /* SettingsView.swift in Sources */,
+				A30000000000000000000041 /* WorldsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		000000000000000000001002 = {
+		A10000000000000000000005 = {
 			isa = PBXGroup;
 			children = (
-				000000000000000000001004 /* NovaVM */,
-				000000000000000000001003 /* Products */,
+				A10000000000000000000007 /* NovaVM */,
+				A10000000000000000000006 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		000000000000000000001003 /* Products */ = {
+		A10000000000000000000006 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				000000000000000000001008 /* NovaVM.app */,
+				A30000000000000000000001 /* NovaVM.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		000000000000000000001004 /* NovaVM */ = {
+		A10000000000000000000007 /* NovaVM */ = {
 			isa = PBXGroup;
 			children = (
-				000000000000000000001013 /* NovaVMApp.swift */,
-				000000000000000000001015 /* NovaCPU.swift */,
-				000000000000000000001017 /* NovaMemory.swift */,
-				000000000000000000001019 /* NovaFirmware.swift */,
-				00000000000000000000101B /* NovaVMEngine.swift */,
-				00000000000000000000101D /* NovaConfig.swift */,
-				00000000000000000000101F /* DeviceInfo.swift */,
-				000000000000000000001021 /* MenuView.swift */,
-				000000000000000000001023 /* VMView.swift */,
-				000000000000000000001025 /* SettingsView.swift */,
+				6EEC3EED87A9FD58C6DA4CB8 /* NovaVMApp.swift */,
+				DD815AFB60ADD587BCCE4E2A /* NovaCPU.swift */,
+				8271DF7CD81E70420B883491 /* NovaMemory.swift */,
+				85BBAB6853269926CC6531A8 /* NovaFirmware.swift */,
+				91A148C0ADC276D966184D92 /* NovaVMEngine.swift */,
+				841C33FB64A21B15DC60786C /* NovaConfig.swift */,
+				F4F2F09D554FDCF98207ADA9 /* DeviceInfo.swift */,
+				37EB37DBDE17089498DB1D0F /* MenuView.swift */,
+				2CD41DC2CD6FF9A1C4BF88B2 /* VMView.swift */,
+				7EE3BAF3E506D5D0360BC554 /* SettingsView.swift */,
 			);
 			path = NovaVM;
 			sourceTree = "<group>";
@@ -80,13 +88,13 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		000000000000000000001007 /* NovaVM */ = {
+		A20000000000000000000001 /* NovaVM */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 00000000000000000000100D /* Build configuration list for PBXNativeTarget "NovaVM" */;
+			buildConfigurationList = A20000000000000000000002 /* Build configuration list for PBXNativeTarget "NovaVM" */;
 			buildPhases = (
-				000000000000000000001009 /* Sources */,
-				00000000000000000000100A /* Frameworks */,
-				00000000000000000000100B /* Resources */,
+				A20000000000000000000010 /* Sources */,
+				A20000000000000000000011 /* Frameworks */,
+				A20000000000000000000012 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -94,19 +102,20 @@
 			);
 			name = NovaVM;
 			productName = NovaVM;
-			productReference = 000000000000000000001008 /* NovaVM.app */;
+			productReference = A30000000000000000000001 /* NovaVM.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		000000000000000000001001 /* Project object */ = {
+		A10000000000000000000001 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1700;
 				LastUpgradeCheck = 1700;
 			};
-			buildConfigurationList = 00000000000000000000100C /* Build configuration list for PBXProject "NovaVM" */;
+			buildConfigurationList = A10000000000000000000002 /* Build configuration list for PBXProject "NovaVM" */;
 			compatibilityVersion = "Xcode 15.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -114,18 +123,21 @@
 				en,
 				Base,
 			);
-			mainGroup = 000000000000000000001002;
-			productRefGroup = 000000000000000000001003 /* Products */;
+			mainGroup = A10000000000000000000005;
+			packageReferences = (
+				A40000000000000000000001 /* XCLocalSwiftPackageReference ".." */,
+			);
+			productRefGroup = A10000000000000000000006 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				000000000000000000001007 /* NovaVM */,
+				A20000000000000000000001 /* NovaVM */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		00000000000000000000100B /* Resources */ = {
+		A20000000000000000000012 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -135,93 +147,233 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		000000000000000000001009 /* Sources */ = {
+		A20000000000000000000010 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				000000000000000000001012 /* NovaVMApp.swift in Sources */,
-				000000000000000000001014 /* NovaCPU.swift in Sources */,
-				000000000000000000001016 /* NovaMemory.swift in Sources */,
-				000000000000000000001018 /* NovaFirmware.swift in Sources */,
-				00000000000000000000101A /* NovaVMEngine.swift in Sources */,
-				00000000000000000000101C /* NovaConfig.swift in Sources */,
-				00000000000000000000101E /* DeviceInfo.swift in Sources */,
-				000000000000000000001020 /* MenuView.swift in Sources */,
-				000000000000000000001022 /* VMView.swift in Sources */,
-				000000000000000000001024 /* SettingsView.swift in Sources */,
+				3886B7000F3BFF1552116492 /* NovaVMApp.swift in Sources */,
+				20C0AEC545141B4D03071606 /* NovaCPU.swift in Sources */,
+				E4C19325F56D4637FB35EC98 /* NovaMemory.swift in Sources */,
+				94C4525BC721AAA0224EE8B2 /* NovaFirmware.swift in Sources */,
+				D00DE84F7B25C0E67479F283 /* NovaVMEngine.swift in Sources */,
+				9678A5FD7888AD50510ECAC5 /* NovaConfig.swift in Sources */,
+				5A7F6FB5E2A3A141A810EEC9 /* DeviceInfo.swift in Sources */,
+				32A6AD617CE34EC5C0827A70 /* MenuView.swift in Sources */,
+				5F5B9D2EEADD9E28DDC5D588 /* VMView.swift in Sources */,
+				020C6D4EF7A852700D0BCEE6 /* SettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		00000000000000000000100E /* Debug */ = {
+		A10000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_IMPLICIT_RETAIN_SELF = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				CLANG_WARN_IMPLICIT_RETAIN_SELF = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
 			};
 			name = Debug;
 		};
-		00000000000000000000100F /* Release */ = {
+		A10000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_IMPLICIT_RETAIN_SELF = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
 		};
-		000000000000000000001010 /* Debug */ = {
+		A20000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_STYLE = Manual;
-				INFOPLIST_FILE = NovaVM/Info.plist;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GENERATE_INFOPLIST_FILE = NovaVM/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = NOVA;
+				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nova.vm;
-				PRODUCT_NAME = $(TARGET_NAME);
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				// Mac Catalyst: one target runs on Intel + Apple Silicon Macs.
+				SUPPORTS_MACCATALYST = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1,2;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
-		000000000000000000001011 /* Release */ = {
+		A20000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_STYLE = Manual;
-				INFOPLIST_FILE = NovaVM/Info.plist;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NovaVM/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = NOVA;
+				INFOPLIST_KEY_LSRequiresIPhoneOS = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nova.vm;
-				PRODUCT_NAME = $(TARGET_NAME);
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				SWIFT_OPTIMIZATION_LEVEL = -O;
+				// Mac Catalyst: one target runs on Intel + Apple Silicon Macs.
+				SUPPORTS_MACCATALYST = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 1,2;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		00000000000000000000100C /* Build configuration list for PBXProject "NovaVM" */ = {
+		A10000000000000000000002 /* Build configuration list for PBXProject "NovaVM" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				00000000000000000000100E /* Debug */,
-				00000000000000000000100F /* Release */,
+				A10000000000000000000003 /* Debug */,
+				A10000000000000000000004 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		00000000000000000000100D /* Build configuration list for PBXNativeTarget "NovaVM" */ = {
+		A20000000000000000000002 /* Build configuration list for PBXNativeTarget "NovaVM" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				000000000000000000001010 /* Debug */,
-				000000000000000000001011 /* Release */,
+				A20000000000000000000003 /* Debug */,
+				A20000000000000000000004 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+
+
 	};
-	rootObject = 000000000000000000001001 /* Project object */;
+	rootObject = A10000000000000000000001 /* Project object */;
 }
