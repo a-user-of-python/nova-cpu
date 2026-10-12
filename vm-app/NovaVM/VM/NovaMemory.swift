@@ -109,6 +109,19 @@ final class NovaMemory {
         bytes[Int(addr)] = v
     }
 
+    @inline(__always) func write16(_ addr: UInt64, _ v: UInt16) throws {
+        try checkWrite(addr, 2)
+        let i = Int(addr)
+        bytes[i] = UInt8(v & 0xFF)
+        bytes[i+1] = UInt8((v >> 8) & 0xFF)
+    }
+
+    @inline(__always) func write32(_ addr: UInt64, _ v: UInt32) throws {
+        try checkWrite(addr, 4)
+        let i = Int(addr)
+        for b in 0..<4 { bytes[i+b] = UInt8((v >> (b*8)) & 0xFF) }
+    }
+
     @inline(__always) func write64(_ addr: UInt64, _ v: UInt64) throws {
         try checkWrite(addr, 8)
         let i = Int(addr)
