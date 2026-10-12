@@ -382,9 +382,10 @@ final class NovaCPU {
         case 0xF5: // CPUID
             let leaf = try dpop()
             switch leaf {
-            case 0: try dpush(0x4E564F41) // "NOVA"
+            case 0: try dpush(0x4E564F41) // "NOVA" vendor
             case 1: try dpush(0x0200)     // version 2.0
             case 2: try dpush(0b0111)     // FP|SIMD|crypto
+            case 3: try dpush(0x00312D61766F4E) // "Nova-1" model name (packed ASCII)
             default: try dpush(0)
             }
 

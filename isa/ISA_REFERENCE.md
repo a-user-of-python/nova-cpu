@@ -212,7 +212,7 @@ Vector stack entries are 128-bit. Suffix selects lane width.
 | `0xF5` | CPUID | 1 | `n → v` | Push CPU info leaf n |
 | `0xFF` | EXT | 2 | — | Escape: second byte selects extended op (reserved) |
 
-`CPUID` leaves: `0` → vendor `0x4E564F41`; `1` → arch version; `2` → feature bits (bit0=FP, bit1=SIMD, bit2=crypto, bit3=virt).
+`CPUID` leaves: `0` → vendor `0x4E564F41` ("NOVA"); `1` → arch version; `2` → feature bits (bit0=FP, bit1=SIMD, bit2=crypto, bit3=virt); `3` → model name `0x00312D61766F4E` ("Nova-1" packed ASCII).
 
 ---
 
