@@ -177,6 +177,8 @@ final class NovaCPU {
             try dpush(depth)
         case 0x11: // DSPGET
             try dpush(dsp)
+        case 0x12: // DSPSET (privileged: firmware use only)
+            dsp = try dpop()
         case 0x13: // FPGET
             try dpush(fp)
         case 0x14: // ENTER n
@@ -373,6 +375,10 @@ final class NovaCPU {
             let off = Int64(Int16(bitPattern: try memory.read16(pc))); pc &+= 2
             try cpush(pc)
             pc = UInt64(Int64(bitPattern: pc) &+ off)
+        case 0xA9: // CALL32 off32
+            let off32 = Int64(Int32(bitPattern: try memory.read32(pc))); pc &+= 4
+            try cpush(pc)
+            pc = UInt64(Int64(bitPattern: pc) &+ off32)
         case 0xAB: // RET
             pc = try cpop()
         case 0xAC: // JMPI
