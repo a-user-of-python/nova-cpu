@@ -163,8 +163,8 @@ struct VMView: View {
         }
         // Send Enter key too
         engine.memory.pushKey(10)
-        // Echo to console
-        engine.consoleText += keyboardInput + "\n"
+        // Do NOT echo here: the guest shell echoes via console MMIO.
+        // Echoing here creates duplicates and confusion.
         keyboardInput = ""
     }
 }
