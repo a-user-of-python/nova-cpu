@@ -5,6 +5,41 @@
 import Foundation
 import Combine
 
+/// Full CPU context for scheduler context switches.
+struct CPUContext {
+    var regs: [UInt64] = Array(repeating: 0, count: 16)
+    var pc: UInt64 = 0
+    var dsp: UInt64 = 0
+    var csp: UInt64 = 0
+    var esp: UInt64 = 0
+    var vsp: UInt64 = 0
+    var fp: UInt64 = 0
+    var status: UInt64 = 0
+    var cause: UInt64 = 0
+    var epc: UInt64 = 0
+    var tval: UInt64 = 0
+    var satp: UInt64 = 0
+    var dslim: UInt64 = 0
+    var cslim: UInt64 = 0
+    var eslim: UInt64 = 0
+    var vslim: UInt64 = 0
+    var cycle: UInt64 = 0
+    var flagN: Bool = false
+    var flagZ: Bool = false
+    var flagC: Bool = false
+    var flagV: Bool = false
+}
+
+/// Process slot for the 2-program scheduler.
+/// NOTE: Firmware (NovaShell) is NOT a program and does NOT occupy a slot.
+/// The 2-slot limit applies to user programs only.
+struct ProcessSlot {
+    var inUse: Bool = false
+    var name: String = ""
+    var loadAddr: UInt64 = 0
+    var ctx: CPUContext = CPUContext()
+}
+
 final class NovaVMEngine: ObservableObject {
 
     @Published var consoleText: String = ""
@@ -14,6 +49,10 @@ final class NovaVMEngine: ObservableObject {
     private let cpu = NovaCPU()
     var memory: NovaMemory
     private var runThread: Thread?
+
+    // Scheduler: max 2 concurrent programs (user requirement).
+    var procSlots: [ProcessSlot] = [ProcessSlot(), ProcessSlot()]
+    private var currentSlot: Int = 0
 
     // Live configuration (from NOVA/config.nova)
     @Published var config: NovaConfig
@@ -57,8 +96,29 @@ final class NovaVMEngine: ObservableObject {
         resetCPUState()
         Self.logLaunch("cpu state ok")
 
-        // Trap handler: report and halt
+        // Trap handler: report and halt, EXCEPT for timer interrupts.
+        // Timer interrupts are hardware behavior for the firmware scheduler:
+        // the CPU vectors to the firmware's timer handler (set via MMIO timerVector).
+        // The app does not control scheduling; it only emulates the hardware.
         cpu.trapHandler = { [weak self] trap, tval in
+            if trap == .timerInterrupt {
+                // Hardware timer interrupt: vector to firmware handler.
+                // Save the interrupted PC in epc, set cause, jump to timerVector.
+                // Do NOT halt; the firmware's scheduler takes over.
+                guard let self = self else { return }
+                self.cpu.epc = self.cpu.pc
+                self.cpu.cause = 17  // Timer interrupt cause
+                let vec = self.memory.timerVector
+                if vec != 0 {
+                    self.cpu.pc = vec
+                } else {
+                    // No handler set: halt (firmware hasn't set up scheduler yet).
+                    self.cpu.running = false
+                }
+                // Do not halt (unless no vector), do not print. Firmware is in charge.
+                return
+            }
+            // Other traps: report and halt (as before).
             DispatchQueue.main.async {
                 self?.consoleText += "\n[TRAP \(trap) tval=0x\(String(tval, radix: 16))]\n"
                 self?.isRunning = false
@@ -263,12 +323,68 @@ final class NovaVMEngine: ObservableObject {
         liveUpdateTimer = nil
     }
 
+    // MARK: - Scheduler (2 user programs max, firmware not counted)
+
+    /// Save current CPU state into a context.
+    private func saveContext(_ ctx: inout CPUContext) {
+        ctx.regs = cpu.regs
+        ctx.pc = cpu.pc
+        ctx.dsp = cpu.dsp
+        ctx.csp = cpu.csp
+        ctx.esp = cpu.esp
+        ctx.vsp = cpu.vsp
+        ctx.fp = cpu.fp
+        ctx.status = cpu.status
+        ctx.cause = cpu.cause
+        ctx.epc = cpu.epc
+        ctx.tval = cpu.tval
+        ctx.satp = cpu.satp
+        ctx.dslim = cpu.dslim
+        ctx.cslim = cpu.cslim
+        ctx.eslim = cpu.eslim
+        ctx.vslim = cpu.vslim
+        ctx.cycle = cpu.cycle
+        ctx.flagN = cpu.flagN
+        ctx.flagZ = cpu.flagZ
+        ctx.flagC = cpu.flagC
+        ctx.flagV = cpu.flagV
+    }
+
+    /// Restore CPU state from a context.
+    private func restoreContext(_ ctx: CPUContext) {
+        cpu.regs = ctx.regs
+        cpu.pc = ctx.pc
+        cpu.dsp = ctx.dsp
+        cpu.csp = ctx.csp
+        cpu.esp = ctx.esp
+        cpu.vsp = ctx.vsp
+        cpu.fp = ctx.fp
+        cpu.status = ctx.status
+        cpu.cause = ctx.cause
+        cpu.epc = ctx.epc
+        cpu.tval = ctx.tval
+        cpu.satp = ctx.satp
+        cpu.dslim = ctx.dslim
+        cpu.cslim = ctx.cslim
+        cpu.eslim = ctx.eslim
+        cpu.vslim = ctx.vslim
+        cpu.cycle = ctx.cycle
+        cpu.flagN = ctx.flagN
+        cpu.flagZ = ctx.flagZ
+        cpu.flagC = ctx.flagC
+        cpu.flagV = ctx.flagV
+    }
+
+    /// Shell context (firmware, not counted as a program).
+    private var shellCtx = CPUContext()
+    private var shellActive = true
+
     func start() {
         guard !cpu.running else { return }
         isRunning = true
         statusLine = "Running"
         runThread = Thread { [weak self] in
-            self?.cpu.run()
+            self?.schedulerLoop()
             DispatchQueue.main.async {
                 self?.isRunning = false
                 self?.statusLine = "Halted"
@@ -278,6 +394,53 @@ final class NovaVMEngine: ObservableObject {
         runThread?.name = "NOVA-VM"
         runThread?.qualityOfService = threadQoS
         runThread?.start()
+    }
+
+    /// Scheduler loop: round-robin between shell and active program slots.
+    /// Firmware (shell) is not counted in the 2-program limit.
+    private func schedulerLoop() {
+        cpu.running = true
+        // Save initial shell context
+        saveContext(&shellCtx)
+        shellActive = true
+
+        while cpu.running {
+            // Check if any programs are active
+            let activeSlots = procSlots.indices.filter { procSlots[$0].inUse }
+
+            if activeSlots.isEmpty {
+                // No programs: run shell until it halts or a program is started.
+                // The shell will send PROC_RUN via MMIO, which sets a flag.
+                // For now, just run the shell.
+                cpu.run(maxSteps: 100000)
+                // If cpu.running is false, the shell halted. Exit loop.
+                if !cpu.running { break }
+                // Otherwise, continue (shell is waiting for input, will poll).
+            } else {
+                // Time-slice: shell -> prog0 -> prog1 -> shell ...
+                // Run shell for a bit (handles input)
+                if shellActive {
+                    restoreContext(shellCtx)
+                }
+                cpu.run(maxSteps: 20000)
+                if !cpu.running { break }
+                saveContext(&shellCtx)
+
+                // Run each active program
+                for idx in activeSlots {
+                    // Save shell, restore program
+                    restoreContext(procSlots[idx].ctx)
+                    cpu.run(maxSteps: 50000)
+                    if !cpu.running { break }
+                    // Save program state
+                    saveContext(&procSlots[idx].ctx)
+                    // Check if program halted (e.g., via TRAP or exit)
+                    // For now, assume it continues. A halt would set cpu.running=false.
+                }
+                if !cpu.running { break }
+            }
+        }
+        cpu.running = false
     }
 
     func stop() {

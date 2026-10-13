@@ -26,6 +26,7 @@ enum NovaTrap: UInt64, Error {
     case storePageFault      = 14
     case stackOverflow       = 15
     case stackUnderflow      = 16
+    case timerInterrupt      = 17  // Hardware timer fired (for firmware scheduler)
 }
 
 final class NovaMemory {
@@ -172,6 +173,14 @@ final class NovaMemory {
     static let fileArg1Addr: UInt64 = 0xFFFF_FFFF_FFFF_0020
     static let fileArg2Addr: UInt64 = 0xFFFF_FFFF_FFFF_0028
     static let fileResultAddr: UInt64 = 0xFFFF_FFFF_FFFF_0030
+    // Hardware timer (for firmware scheduler). Firmware writes interval in cycles.
+    // Write 0 to disable. When the timer fires, the CPU takes a Machine trap
+    // and vectors to the firmware's trap handler (hardware behavior, not app control).
+    static let timerIntervalAddr: UInt64 = 0xFFFF_FFFF_FFFF_0040
+    static let timerCountAddr: UInt64 = 0xFFFF_FFFF_FFFF_0048
+    // Timer vector: firmware writes its handler address here (like mtvec).
+    // On timer interrupt, the CPU jumps to this address.
+    static let timerVectorAddr: UInt64 = 0xFFFF_FFFF_FFFF_0050
 
     var consoleOutput: ((String) -> Void)?
 
@@ -187,6 +196,14 @@ final class NovaMemory {
     private var fileArg2: UInt64 = 0
     private var fileResult: Int64 = 0
 
+    /// Hardware timer interval in CPU cycles (0 = disabled). Set by firmware via MMIO.
+    /// The CPU checks this and fires a timer interrupt when the cycle count reaches it.
+    var timerInterval: UInt64 = 0
+    /// Timer countdown (cycles remaining). Firmware can read via MMIO.
+    var timerCount: UInt64 = 0
+    /// Timer vector: firmware's handler address (like mtvec). Set via MMIO.
+    var timerVector: UInt64 = 0
+
     /// Buffer for assembling multi-byte UTF-8 sequences from MMIO writes.
     private var utf8Buffer = [UInt8]()
 
@@ -201,6 +218,11 @@ final class NovaMemory {
                 utf8Buffer.removeAll()
                 consoleOutput?(s)
             }
+        } else if addr == Self.timerIntervalAddr {
+            timerInterval = v
+            timerCount = v  // Reset countdown
+        } else if addr == Self.timerVectorAddr {
+            timerVector = v
         } else if addr == Self.fileCmdAddr {
             // Execute file command synchronously
             if let handler = fileHandler {
@@ -222,6 +244,12 @@ final class NovaMemory {
             return keyboardQueue.isEmpty ? 0 : UInt64(keyboardQueue.removeFirst())
         } else if addr == Self.fileResultAddr {
             return UInt64(bitPattern: fileResult)
+        } else if addr == Self.timerCountAddr {
+            return timerCount
+        } else if addr == Self.timerIntervalAddr {
+            return timerInterval
+        } else if addr == Self.timerVectorAddr {
+            return timerVector
         }
         return 0
     }

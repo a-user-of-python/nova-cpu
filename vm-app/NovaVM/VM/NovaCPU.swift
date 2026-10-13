@@ -103,6 +103,21 @@ final class NovaCPU {
         pc &+= 1
         cycle &+= 1
 
+        // Hardware timer check (for firmware scheduler).
+        // If the timer is enabled and has fired, take a Machine timer interrupt.
+        // The firmware's trap handler (at the timer vector) is responsible for
+        // context switching. This is hardware behavior, not app control.
+        if memory.timerInterval > 0 {
+            if memory.timerCount > 0 {
+                memory.timerCount &-= 1
+            }
+            if memory.timerCount == 0 {
+                // Timer fired. Reset for periodic mode.
+                memory.timerCount = memory.timerInterval
+                throw NovaTrap.timerInterrupt
+            }
+        }
+
         switch opcode {
         // ---- Stack manipulation ----
         case 0x00: break // NOP
