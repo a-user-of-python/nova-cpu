@@ -306,7 +306,7 @@ final class NovaVMEngine: ObservableObject {
             if useCustomFirmware, let custom = customFirmwareData {
                 fwData = custom
             } else {
-                fwData = NovaFirmware.builtIn
+                fwData = NovaFirmware.defaultImage
             }
             if let fw = fwData {
                 for i in 0..<fw.count {
