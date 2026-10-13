@@ -5,21 +5,6 @@
 import Foundation
 import Combine
 
-/// Process slot for the 2-program scheduler.
-struct ProcessSlot {
-    var inUse: Bool = false
-    var name: String = ""
-    var pc: UInt64 = 0
-    var regs: [UInt64] = Array(repeating: 0, count: 16)
-    var dsp: UInt64 = 0
-    var csp: UInt64 = 0
-    var vsp: UInt64 = 0
-    var esp: UInt64 = 0
-    var fp: UInt64 = 0
-    var status: UInt64 = 0
-    var loadAddr: UInt64 = 0
-}
-
 final class NovaVMEngine: ObservableObject {
 
     @Published var consoleText: String = ""
@@ -29,10 +14,6 @@ final class NovaVMEngine: ObservableObject {
     private let cpu = NovaCPU()
     var memory: NovaMemory
     private var runThread: Thread?
-
-    // Scheduler: max 2 concurrent programs (user requirement).
-    var procSlots: [ProcessSlot] = [ProcessSlot(), ProcessSlot()]
-    private var currentSlot: Int = 0
 
     // Live configuration (from NOVA/config.nova)
     @Published var config: NovaConfig
