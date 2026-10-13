@@ -94,6 +94,9 @@ struct VMView: View {
                 Button(action: { engine.reset() }) {
                     Label("Reset", systemImage: "arrow.counterclockwise")
                 }
+                Button(action: { engine.reboot() }) {
+                    Label("Reboot", systemImage: "power")
+                }
                 Button(action: { showingImport = true }) {
                     Label("Import", systemImage: "arrow.down.circle")
                 }

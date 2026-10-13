@@ -294,4 +294,30 @@ final class NovaVMEngine: ObservableObject {
         statusLine = "Reset"
         snapshotRegisters()
     }
+
+    /// Completely reboot the VM: reset CPU, reload firmware, clear console, and start.
+    /// Use this when the VM is halted and you want a fresh boot.
+    func reboot() {
+        stop()
+        resetCPUState()
+        // Reload firmware bytes into memory at 0x0
+        if useFirmware {
+            let fwData: Data?
+            if useCustomFirmware, let custom = customFirmwareData {
+                fwData = custom
+            } else {
+                fwData = NovaFirmware.builtIn
+            }
+            if let fw = fwData {
+                for i in 0..<fw.count {
+                    try? memory.write8(UInt64(i), fw[i])
+                }
+            }
+        }
+        consoleText = ""
+        statusLine = "Rebooting..."
+        snapshotRegisters()
+        // Start the VM
+        start()
+    }
 }
