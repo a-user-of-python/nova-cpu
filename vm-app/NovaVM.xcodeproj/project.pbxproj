@@ -16,6 +16,7 @@
 		5A7F6FB5E2A3A141A810EEC9 /* DeviceInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4F2F09D554FDCF98207ADA9 /* DeviceInfo.swift */; };
 		32A6AD617CE34EC5C0827A70 /* MenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37EB37DBDE17089498DB1D0F /* MenuView.swift */; };
 		5F5B9D2EEADD9E28DDC5D588 /* VMView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CD41DC2CD6FF9A1C4BF88B2 /* VMView.swift */; };
+		2FBF616B27E60EA067158CBA /* ProgramImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 234D23400DCDD5DBC2745474 /* ProgramImportView.swift */; };
 		020C6D4EF7A852700D0BCEE6 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EE3BAF3E506D5D0360BC554 /* SettingsView.swift */; };
 /* End PBXBuildFile section */
 
@@ -30,6 +31,7 @@ A30000000000000000000001 /* NovaVM.app */ = {isa = PBXFileReference; explicitFil
 		F4F2F09D554FDCF98207ADA9 /* DeviceInfo.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/DeviceInfo.swift; sourceTree = "<group>"; };
 		37EB37DBDE17089498DB1D0F /* MenuView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Views/MenuView.swift; sourceTree = "<group>"; };
 		2CD41DC2CD6FF9A1C4BF88B2 /* VMView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Views/VMView.swift; sourceTree = "<group>"; };
+		234D23400DCDD5DBC2745474 /* ProgramImportView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Views/ProgramImportView.swift; sourceTree = "<group>"; };
 		7EE3BAF3E506D5D0360BC554 /* SettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Views/SettingsView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -80,6 +82,7 @@ A30000000000000000000001 /* NovaVM.app */ = {isa = PBXFileReference; explicitFil
 				F4F2F09D554FDCF98207ADA9 /* DeviceInfo.swift */,
 				37EB37DBDE17089498DB1D0F /* MenuView.swift */,
 				2CD41DC2CD6FF9A1C4BF88B2 /* VMView.swift */,
+				234D23400DCDD5DBC2745474 /* ProgramImportView.swift */,
 				7EE3BAF3E506D5D0360BC554 /* SettingsView.swift */,
 			);
 			path = NovaVM;
@@ -178,6 +181,7 @@ A30000000000000000000001 /* NovaVM.app */ = {isa = PBXFileReference; explicitFil
 				5A7F6FB5E2A3A141A810EEC9 /* DeviceInfo.swift in Sources */,
 				32A6AD617CE34EC5C0827A70 /* MenuView.swift in Sources */,
 				5F5B9D2EEADD9E28DDC5D588 /* VMView.swift in Sources */,
+				2FBF616B27E60EA067158CBA /* ProgramImportView.swift in Sources */,
 				020C6D4EF7A852700D0BCEE6 /* SettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
