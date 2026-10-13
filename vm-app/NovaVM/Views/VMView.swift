@@ -66,6 +66,7 @@ struct VMView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showingRegisters = false
     @State private var keyboardInput = ""
+    @State private var showingImport = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -93,8 +94,14 @@ struct VMView: View {
                 Button(action: { engine.reset() }) {
                     Label("Reset", systemImage: "arrow.counterclockwise")
                 }
+                Button(action: { showingImport = true }) {
+                    Label("Import", systemImage: "arrow.down.circle")
+                }
             }
             .padding()
+            .sheet(isPresented: $showingImport) {
+                ProgramImportView()
+            }
 
             // Register viewer — all 16 at once, not just top of stack
             if showingRegisters {
