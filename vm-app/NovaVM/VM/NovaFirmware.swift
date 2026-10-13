@@ -6,26 +6,19 @@ import Foundation
 /// Handles memory init, stack setup, trap vectors, and console I/O.
 struct NovaFirmware {
 
-    /// Default firmware: minimal machine-mode init written in NOVA assembly.
-    /// Sets up stacks, installs a trap handler that halts, jumps to 0x1000 (program entry).
-    ///
-    /// Assembled by hand (see docs/FIRMWARE_ASM.md for source):
-    ///   0x0000: DSPSET etc. are privileged — firmware runs at machine level.
+    /// Default firmware: NovaShell (interactive shell), embedded in NovaShellDefault.swift.
+    /// Runs at 0x0. Programs load at 0x1000 on top of it (via the app's
+    /// program loader or NovaShell's `run <file>` command).
     static var defaultImage: Data {
-        var bytes = [UInt8]()
-        func emit(_ b: UInt8) { bytes.append(b) }
-        func emit64(_ v: UInt64) {
-            for i in 0..<8 { bytes.append(UInt8((v >> (i*8)) & 0xFF)) }
+        // NovaShell is the default. The minimal JMP stub is kept as a
+        // fallback in case the embedded image is ever unavailable.
+        let shell = novaShellImage
+        if !shell.isEmpty {
+            return shell
         }
-        // --- Set stack limits (firmware runs privileged) ---
-        // DSLIM = dataStackBase - 8MB (set by host; firmware reads via CPUID-like)
-        // For the default image we rely on the host having preset dsp/csp/dslim.
-        // --- Install trap vector: all traps → halt loop ---
-        // Write a 2-byte infinite loop at the trap vector area is host's job.
-        // --- Jump to program entry at 0x1000 ---
-        // JMP32 with offset = 0x1000 - (pc after insn)
-        // insn at 0x0000, 5 bytes → pc=5, target 0x1000 → offset 0x0FFB
-        emit(0xA1) // JMP32
+        // Fallback: minimal JMP32 to 0x1000 (program entry).
+        var bytes = [UInt8]()
+        bytes.append(0xA1) // JMP32
         let off = Int32(0x1000 - 5)
         let u = UInt32(bitPattern: off)
         for i in 0..<4 { bytes.append(UInt8((u >> (i*8)) & 0xFF)) }

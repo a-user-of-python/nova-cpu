@@ -100,7 +100,7 @@ struct MenuView: View {
                                     .foregroundColor(.secondary)
                             }
                         } else {
-                            Text("Built-in default firmware")
+                            Text("Built-in NovaShell (default) — programs run on top")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -124,7 +124,7 @@ struct MenuView: View {
                     }
                     .padding(.horizontal, 24)
 
-                    Text("Drop .bin files in Files → NovaVM → NOVA → programs")
+                    Text("Drop .bin files in Files → NovaVM → NOVA → programs. They run on top of NovaShell — boot to the shell, then type run <file>.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 24)
