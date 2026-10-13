@@ -157,6 +157,11 @@ final class NovaVMEngine: ObservableObject {
     /// and firmware runs first; otherwise program runs from 0x0.
     func loadProgram(_ data: Data) throws {
         guard data.count < memorySize / 2 else { throw NovaError.programTooLarge }
+        // Stop any running VM first. Without this, the old firmware/program
+        // keeps running in the background: the new load never takes effect,
+        // Run appears to do nothing, and the firmware seems "stuck".
+        cpu.running = false
+        isRunning = false
         if useFirmware {
             let fw: Data
             if useCustomFirmware, let custom = customFirmwareData {

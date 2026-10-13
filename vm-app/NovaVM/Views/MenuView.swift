@@ -61,7 +61,7 @@ struct MenuView: View {
                             }
                             .padding(.horizontal, 20)
 
-                            Text("Drop .bin files in Files → NovaVM → NOVA → firmware")
+                            Text("Drop .bin files in Files → NovaVM → NOVA → firmware. Tap the selected firmware again to deselect it and return to the built-in default.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .padding(.horizontal, 20)
@@ -244,7 +244,16 @@ struct MenuView: View {
     }
 
     /// Load firmware directly from the NOVA/firmware folder (no picker).
+    /// Tapping the already-selected firmware deselects it and turns custom
+    /// firmware off, returning to the built-in default.
     private func loadFirmwareFromFolder(_ name: String) {
+        // Tap again to deselect → back to built-in default firmware.
+        if engine.customFirmwareName == name {
+            engine.customFirmwareData = nil
+            engine.customFirmwareName = nil
+            engine.useCustomFirmware = false
+            return
+        }
         let url = NovaFolders.firmwareDir.appendingPathComponent(name)
         do {
             let data = try Data(contentsOf: url)
@@ -254,6 +263,7 @@ struct MenuView: View {
             }
             engine.customFirmwareData = data
             engine.customFirmwareName = name
+            engine.useCustomFirmware = true
         } catch {
             errorMessage = error.localizedDescription
         }
