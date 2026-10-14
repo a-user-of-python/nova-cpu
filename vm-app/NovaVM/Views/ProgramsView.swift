@@ -12,7 +12,7 @@ struct ProgramsView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack(spacing: 16) {
                 // Currently selected program (with Deselect)
                 if let name = engine.selectedProgramName {

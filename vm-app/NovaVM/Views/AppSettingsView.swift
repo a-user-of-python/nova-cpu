@@ -18,7 +18,7 @@ struct AppSettingsView: View {
     @EnvironmentObject var settings: AppSettings
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             Form {
                 Section(header: Text("Console").font(.headline)) {
                     VStack(alignment: .leading, spacing: 8) {

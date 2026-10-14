@@ -17,7 +17,7 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             Form {
                 // Chip readout
                 Section(header: Text("Processor").font(.headline)) {
