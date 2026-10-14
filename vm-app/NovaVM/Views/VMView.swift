@@ -93,39 +93,6 @@ struct VMView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header — Running/Halted indicator, no Close (tab bar is navigation)
-            HStack {
-                Text(engine.isRunning ? "● Running" : "○ Halted")
-                    .font(.headline)
-                    .foregroundColor(engine.isRunning ? .green : .secondary)
-                Spacer()
-                Button(action: { haptic(); showingRegisters.toggle() }) {
-                    Label("Registers", systemImage: "cpu")
-                        .font(.headline)
-                }
-                Button(action: { haptic(); engine.stop() }) {
-                    Label("Stop", systemImage: "stop.fill")
-                        .font(.headline)
-                }
-                .disabled(!engine.isRunning)
-                Button(action: { haptic(); engine.reset() }) {
-                    Label("Reset", systemImage: "arrow.counterclockwise")
-                        .font(.headline)
-                }
-                Button(action: { haptic(); engine.boot() }) {
-                    Label("Reboot", systemImage: "power")
-                        .font(.headline)
-                }
-                Button(action: { haptic(); showingImport = true }) {
-                    Label("Import", systemImage: "arrow.down.circle")
-                        .font(.headline)
-                }
-            }
-            .padding()
-            .sheet(isPresented: $showingImport) {
-                ProgramImportView()
-            }
-
             // Register viewer — all 16 at once, not just top of stack
             if showingRegisters {
                 RegisterGrid(engine: engine)
@@ -140,7 +107,7 @@ struct VMView: View {
                     }
             }
 
-            // Console
+            // Console — full width, edge to edge
             ScrollViewReader { proxy in
                 ScrollView {
                     Group {
@@ -158,8 +125,6 @@ struct VMView: View {
                 }
                 .background(consoleBackground)
                 .foregroundColor(consoleForeground)
-                .cornerRadius(12)
-                .padding(.horizontal)
                 .onChange(of: engine.consoleText) { _ in
                     proxy.scrollTo("consoleEnd", anchor: .bottom)
                 }
@@ -178,6 +143,47 @@ struct VMView: View {
                     .font(.headline)
             }
             .padding(.horizontal)
+            .padding(.vertical, 8)
+
+            // Bottom control bar — Running/Halted, Registers, Stop, Reset, Reboot, Import
+            HStack {
+                Text(engine.isRunning ? "● Running" : "○ Halted")
+                    .font(.headline)
+                    .foregroundColor(engine.isRunning ? .green : .secondary)
+                Spacer()
+                Button(action: { haptic(); showingRegisters.toggle() }) {
+                    Label("Registers", systemImage: "cpu")
+                        .font(.headline)
+                        .labelStyle(.iconOnly)
+                }
+                Button(action: { haptic(); engine.stop() }) {
+                    Label("Stop", systemImage: "stop.fill")
+                        .font(.headline)
+                        .labelStyle(.iconOnly)
+                }
+                .disabled(!engine.isRunning)
+                Button(action: { haptic(); engine.reset() }) {
+                    Label("Reset", systemImage: "arrow.counterclockwise")
+                        .font(.headline)
+                        .labelStyle(.iconOnly)
+                }
+                Button(action: { haptic(); engine.boot() }) {
+                    Label("Reboot", systemImage: "power")
+                        .font(.headline)
+                        .labelStyle(.iconOnly)
+                }
+                Button(action: { haptic(); showingImport = true }) {
+                    Label("Import", systemImage: "arrow.down.circle")
+                        .font(.headline)
+                        .labelStyle(.iconOnly)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial)
+            .sheet(isPresented: $showingImport) {
+                ProgramImportView()
+            }
 
             // Status bar
             Text(engine.statusLine)
