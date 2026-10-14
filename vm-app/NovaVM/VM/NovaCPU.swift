@@ -213,6 +213,10 @@ final class NovaCPU {
             for i in 0..<16 { try dpush(regs[i]) }
         case 0x1C: // POPALL — pop into R15..R0 (top of stack → R15)
             for i in (0..<16).reversed() { regs[i] = try dpop() }
+        case 0x1D: // CSPGET — push call stack pointer
+            try dpush(csp)
+        case 0x1E: // CSPSET — pop into call stack pointer (privileged)
+            csp = try dpop()
 
         // ---- Integer ALU ----
         case 0x40: // ADD

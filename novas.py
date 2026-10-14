@@ -33,7 +33,7 @@ OPS = {
     'ENTER': (0x14, 1), 'LEAVE': (0x15, 0),
     'LOADL': (0x16, 1), 'STORL': (0x17, 1), 'LOADARG': (0x18, 1),
     'PUSHR': (0x19, 1), 'POPR': (0x1A, 1),
-    'PUSHALL': (0x1B, 0), 'POPALL': (0x1C, 0),
+    'PUSHALL': (0x1B, 0), 'POPALL': (0x1C, 0), 'CSPGET': (0x1D, 0), 'CSPSET': (0x1E, 0),
     'ADD': (0x40, 0), 'SUB': (0x41, 0), 'MUL': (0x42, 0), 'MULH': (0x43, 0),
     'DIV': (0x44, 0), 'DIVU': (0x45, 0), 'REM': (0x46, 0), 'REMU': (0x47, 0),
     'AND': (0x48, 0), 'OR': (0x49, 0), 'XOR': (0x4A, 0),
@@ -152,7 +152,10 @@ def assemble(src):
                 raise ValueError(f"{mn} offset {off} out of range for {isz}-byte immediate")
             out += off.to_bytes(isz, 'little', signed=True)
         elif mn == 'PUSH64':
-            v = parse_int(arg)
+            if arg in labels:
+                v = labels[arg]
+            else:
+                v = parse_int(arg)
             if not (0 <= v <= 0xFFFFFFFFFFFFFFFF):
                 raise ValueError(f"PUSH64 value out of range: {arg}")
             out += v.to_bytes(8, 'little', signed=False)
