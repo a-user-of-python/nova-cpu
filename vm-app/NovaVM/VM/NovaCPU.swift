@@ -26,6 +26,7 @@ final class NovaCPU {
     var epc: UInt64 = 0
     var tval: UInt64 = 0
     var satp: UInt64 = 0
+    var savedStatusForMret: UInt64 = 0  // Saved status for MRET (timer interrupt)
     var dslim: UInt64 = 0
     var cslim: UInt64 = 0
     var eslim: UInt64 = 0
@@ -107,7 +108,8 @@ final class NovaCPU {
         // If the timer is enabled and has fired, take a Machine timer interrupt.
         // The firmware's trap handler (at the timer vector) is responsible for
         // context switching. This is hardware behavior, not app control.
-        if memory.timerInterval > 0 {
+        // Only fire if interrupts are enabled (bit 0 of status).
+        if memory.timerInterval > 0 && (status & 1) != 0 {
             if memory.timerCount > 0 {
                 memory.timerCount &-= 1
             }
@@ -402,6 +404,10 @@ final class NovaCPU {
             throw NovaTrap.ecallU
         case 0xC1: // EBREAK
             throw NovaTrap.breakpoint
+        case 0xC2: // MRET — return from Machine trap
+            // Restore PC from EPC, restore status (re-enables interrupts)
+            pc = epc
+            status = savedStatusForMret
         case 0xC5: // WFI — yield in VM
             running = false
         case 0xCB: // RDTIME
@@ -438,9 +444,34 @@ final class NovaCPU {
             do {
                 try step()
             } catch let trap as NovaTrap {
-                trapHandler?(trap, tval)
-                // Default: halt on unhandled trap
-                if trapHandler == nil { running = false }
+                // Hardware timer interrupt vectoring (for firmware scheduler).
+                // If firmware has set timerVector, vector to it instead of halting.
+                // This is hardware behavior, not app control.
+                if trap == .timerInterrupt && memory.timerVector != 0 {
+                    // Save trap state
+                    epc = pc
+                    cause = 0x8000000000000007  // Machine timer interrupt code
+                    // Push epc and cause onto data stack for firmware handler
+                    // (firmware has no CSRGET, so we pass via stack)
+                    try? dpush(epc)
+                    try? dpush(cause)
+                    // Save status and disable interrupts (clear bit 0)
+                    // Firmware MRET will restore.
+                    // Note: we save status in a CPU field, firmware doesn't need it
+                    // because MRET restores from the saved value.
+                    let savedStatus = status
+                    status &= ~UInt64(1)  // Disable interrupts
+                    // Store saved status where MRET can find it
+                    // (use a dedicated field)
+                    savedStatusForMret = savedStatus
+                    // Jump to firmware handler
+                    pc = memory.timerVector
+                    // Keep running — do NOT call trapHandler or halt
+                } else {
+                    trapHandler?(trap, tval)
+                    // Default: halt on unhandled trap
+                    if trapHandler == nil { running = false }
+                }
             } catch {
                 running = false
             }
