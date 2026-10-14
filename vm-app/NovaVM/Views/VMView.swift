@@ -63,42 +63,62 @@ struct ANSIRenderer {
 
 struct VMView: View {
     @ObservedObject var engine: NovaVMEngine
-    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var appSettings: AppSettings
     @State private var showingRegisters = false
     @State private var keyboardInput = ""
     @State private var showingImport = false
 
+    /// Console colors from the App Settings theme.
+    private var consoleBackground: Color {
+        switch appSettings.consoleTheme {
+        case "light": return .white
+        case "highContrast": return .black
+        default: return .black
+        }
+    }
+
+    private var consoleForeground: Color {
+        switch appSettings.consoleTheme {
+        case "light": return .black
+        case "highContrast": return .yellow
+        default: return .white
+        }
+    }
+
+    /// Light haptic tap, honoring the App Settings toggle.
+    private func haptic() {
+        guard appSettings.hapticFeedback else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            // Header
+            // Header — Running/Halted indicator, no Close (tab bar is navigation)
             HStack {
-                Button(action: {
-                    engine.stop()
-                    dismiss()
-                }) {
-                    Label("Close", systemImage: "xmark")
-                        .font(.headline)
-                }
-                Spacer()
                 Text(engine.isRunning ? "● Running" : "○ Halted")
                     .font(.headline)
                     .foregroundColor(engine.isRunning ? .green : .secondary)
                 Spacer()
-                Button(action: { showingRegisters.toggle() }) {
+                Button(action: { haptic(); showingRegisters.toggle() }) {
                     Label("Registers", systemImage: "cpu")
+                        .font(.headline)
                 }
-                Button(action: { engine.stop() }) {
+                Button(action: { haptic(); engine.stop() }) {
                     Label("Stop", systemImage: "stop.fill")
+                        .font(.headline)
                 }
                 .disabled(!engine.isRunning)
-                Button(action: { engine.reset() }) {
+                Button(action: { haptic(); engine.reset() }) {
                     Label("Reset", systemImage: "arrow.counterclockwise")
+                        .font(.headline)
                 }
-                Button(action: { engine.reboot() }) {
+                Button(action: { haptic(); engine.boot() }) {
                     Label("Reboot", systemImage: "power")
+                        .font(.headline)
                 }
-                Button(action: { showingImport = true }) {
+                Button(action: { haptic(); showingImport = true }) {
                     Label("Import", systemImage: "arrow.down.circle")
+                        .font(.headline)
                 }
             }
             .padding()
@@ -126,18 +146,18 @@ struct VMView: View {
                     Group {
                         if engine.consoleText.isEmpty {
                             Text("No output yet.")
-                                .foregroundColor(.white)
+                                .foregroundColor(consoleForeground)
                         } else {
                             ANSIRenderer.render(engine.consoleText)
                         }
                     }
-                        .font(.system(size: 18, design: .monospaced))
+                        .font(.system(size: appSettings.consoleFontSize, design: .monospaced))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding()
                         .id("consoleEnd")
                 }
-                .background(Color.black)
-                .foregroundColor(Color.white)
+                .background(consoleBackground)
+                .foregroundColor(consoleForeground)
                 .cornerRadius(12)
                 .padding(.horizontal)
                 .onChange(of: engine.consoleText) { _ in
@@ -152,18 +172,30 @@ struct VMView: View {
                 })
                 .textFieldStyle(RoundedBorderTextFieldStyle())
                 .font(.system(size: 18))
-                .autocapitalization(.none)
-                .disableAutocorrection(true)
-                Button("Send") { sendKeys() }
+                .autocapitalization(appSettings.keyboardAutocapitalization ? .sentences : .none)
+                .disableAutocorrection(!appSettings.keyboardAutocorrection)
+                Button("Send") { haptic(); sendKeys() }
                     .font(.headline)
             }
             .padding(.horizontal)
 
             // Status bar
             Text(engine.statusLine)
-                .font(.footnote)
+                .font(.subheadline)
                 .foregroundColor(.secondary)
                 .padding(8)
+        }
+        .onAppear {
+            // Auto-boot when the Run tab appears and nothing is running.
+            if !engine.isRunning {
+                engine.boot()
+            }
+            if appSettings.keepAwake {
+                UIApplication.shared.isIdleTimerDisabled = true
+            }
+        }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
         }
     }
 

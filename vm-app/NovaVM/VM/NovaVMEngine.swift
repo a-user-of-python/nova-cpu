@@ -29,6 +29,14 @@ final class NovaVMEngine: ObservableObject {
     var customFirmwareData: Data?
     var customFirmwareName: String?
 
+    // Program selection (shared across tabs). Tap again to deselect → nil.
+    @Published var selectedProgramName: String?
+    var selectedProgramData: Data?
+
+    // Scheduler / VM tuning
+    @Published var timerInterval: UInt64 = 100000  // scheduler timeslice, cycles
+    @Published var programSlots: Int = 8           // max concurrent programs
+
     // Memory size chosen by user (default 64MB)
     var memorySize: Int
 
@@ -151,6 +159,9 @@ final class NovaVMEngine: ObservableObject {
         cpu.pc = 0
         // Machine privilege, interrupts on
         cpu.status = (3 << 2) | 1
+        // Scheduler timeslice (firmware may override via MMIO)
+        memory.timerInterval = timerInterval
+        memory.timerCount = timerInterval
     }
 
     /// Load a program binary. If firmware is enabled, program goes to 0x1000
@@ -319,5 +330,63 @@ final class NovaVMEngine: ObservableObject {
         snapshotRegisters()
         // Start the VM
         start()
+    }
+
+    /// Boot for the Run tab: load firmware (or run a program directly if
+    /// firmware is off), then auto-run the selected program via the shell's
+    /// `run` command. Works with NO program selected (boots shell only).
+    func boot() {
+        stop()
+        resetCPUState()
+        if useFirmware {
+            let fwData: Data?
+            if useCustomFirmware, let custom = customFirmwareData {
+                fwData = custom
+            } else {
+                fwData = NovaFirmware.defaultImage
+            }
+            if let fw = fwData {
+                try? memory.loadBytes(fw, at: 0)
+            }
+            consoleText = ""
+            statusLine = "Booting NovaShell..."
+            start()
+            // Auto-run the selected program through the shell, so the
+            // firmware scheduler manages it (same as typing `run <file>`).
+            if let progName = selectedProgramName {
+                ensureProgramInSharedDir(progName)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    guard let self = self, self.isRunning else { return }
+                    for byte in "run \(progName)\n".utf8 {
+                        self.memory.pushKey(byte)
+                    }
+                }
+            }
+        } else if let progData = selectedProgramData {
+            // No firmware: run the program binary directly at 0x0.
+            try? memory.loadBytes(progData, at: 0)
+            cpu.pc = 0
+            consoleText = ""
+            statusLine = "Running program directly..."
+            start()
+        } else {
+            consoleText = "No firmware and no program selected.\nEnable firmware or pick a program first."
+            statusLine = "Idle"
+        }
+    }
+
+    /// Copy the selected program into sharedDir so the firmware's `run`
+    /// command (which reads via file MMIO from sharedDir) can find it.
+    private func ensureProgramInSharedDir(_ name: String) {
+        let dest = NovaFolders.sharedDir.appendingPathComponent(name)
+        if FileManager.default.fileExists(atPath: dest.path) { return }
+        if let data = selectedProgramData {
+            try? data.write(to: dest)
+        } else {
+            let src = NovaFolders.programsDir.appendingPathComponent(name)
+            if let data = try? Data(contentsOf: src) {
+                try? data.write(to: dest)
+            }
+        }
     }
 }

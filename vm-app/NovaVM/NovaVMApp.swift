@@ -8,7 +8,7 @@ struct NovaVMApp: App {
 
     var body: some Scene {
         WindowGroup {
-            MenuView(engine: engine)
+            MainTabView(engine: engine)
         }
     }
 }

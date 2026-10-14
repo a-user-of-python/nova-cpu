@@ -1,11 +1,11 @@
-// SettingsView.swift — Chip info + sliders for RAM and core allocation.
-// Large type, high contrast. Writes back to NOVA/config.nova.
+// SettingsView.swift — VM hardware settings: chip info, RAM, cores,
+// scheduler timer interval, program slots. Large type, high contrast.
+// Writes back to NOVA/config.nova.
 
 import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var engine: NovaVMEngine
-    @Environment(\.dismiss) private var dismiss
 
     @State private var cfg: NovaConfig
     private let info: DeviceInfo
@@ -122,17 +122,37 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                 }
 
-                // Firmware
-                Section(header: Text("Firmware").font(.headline)) {
-                    Picker("Firmware", selection: $cfg.firmware) {
-                        Text("Built-in default").tag("default")
-                        ForEach(availableFirmware(), id: \.self) { name in
-                            Text(name).tag(name)
+                // Scheduler — firmware task switching
+                Section(header: Text("Scheduler").font(.headline)) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Timer interval")
+                                .font(.headline)
+                            Spacer()
+                            Text("\(engine.timerInterval / 1000)k cycles")
+                                .font(.headline)
+                                .monospacedDigit()
                         }
+                        Slider(value: Binding(
+                            get: { Double(engine.timerInterval) },
+                            set: { engine.timerInterval = UInt64($0) }
+                        ), in: 10000...1000000, step: 10000)
+                        .accessibilityLabel("Scheduler timer interval")
+                        Text("How often the firmware scheduler switches tasks. Lower = more responsive shell, higher = faster programs.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
                     }
-                    .pickerStyle(.menu)
-                    Text("Custom .bin files go in NOVA/firmware/ (Files app → On My iPad → NovaVM).")
-                        .font(.caption)
+                    .padding(.vertical, 4)
+
+                    HStack {
+                        Text("Program slots")
+                            .font(.headline)
+                        Spacer()
+                        Stepper("\(engine.programSlots)", value: $engine.programSlots, in: 1...8)
+                            .font(.headline)
+                    }
+                    Text("Maximum concurrent programs.")
+                        .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
 
@@ -142,7 +162,6 @@ struct SettingsView: View {
                         var c = cfg
                         c.sanitize(maxCores: info.totalCores, maxP: info.pCores, maxE: info.eCores)
                         engine.applyConfig(c)
-                        dismiss()
                     }
                     .font(.title2)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -154,22 +173,8 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
-            .navigationTitle("NOVA Settings")
+            .navigationTitle("VM Settings")
             .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
         }
-    }
-
-    private func availableFirmware() -> [String] {
-        let fm = FileManager.default
-        let files = (try? fm.contentsOfDirectory(at: NovaFolders.firmwareDir,
-            includingPropertiesForKeys: nil)) ?? []
-        return files.filter { $0.pathExtension.lowercased() == "bin" }
-            .map { $0.lastPathComponent }
-            .sorted()
     }
 }
