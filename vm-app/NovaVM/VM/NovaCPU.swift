@@ -412,6 +412,23 @@ final class NovaCPU {
             // Restore PC from EPC, restore status (re-enables interrupts)
             pc = epc
             status = savedStatusForMret
+        case 0xC6: // CSRGET — push CSR value (0=epc, 1=cause, 2=status)
+            let cget = try memory.read8(pc); pc &+= 1
+            switch cget {
+            case 0: try dpush(epc)
+            case 1: try dpush(cause)
+            case 2: try dpush(status)
+            default: throw NovaTrap.illegalInstruction
+            }
+        case 0xC7: // CSRSET — pop value into CSR (0=epc, 1=cause, 2=status)
+            let cset = try memory.read8(pc); pc &+= 1
+            let cv = try dpop()
+            switch cset {
+            case 0: epc = cv
+            case 1: cause = cv
+            case 2: status = cv
+            default: throw NovaTrap.illegalInstruction
+            }
         case 0xC5: // WFI — yield in VM
             running = false
         case 0xCB: // RDTIME
