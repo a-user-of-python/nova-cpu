@@ -100,12 +100,10 @@ final class NovaCPU {
     // MARK: - Main step
 
     func step() throws {
-        let opcode = try memory.read8(pc)
-        pc &+= 1
-        cycle &+= 1
-
         // Hardware timer check (for firmware scheduler).
-        // If the timer is enabled and has fired, take a Machine timer interrupt.
+        // MUST be before opcode fetch: when the timer fires, epc = pc must
+        // point AT the interrupted instruction (not past it), otherwise MRET
+        // resumes past a fetched-but-unexecuted opcode, corrupting the stack.
         // The firmware's trap handler (at the timer vector) is responsible for
         // context switching. This is hardware behavior, not app control.
         // Only fire if interrupts are enabled (bit 0 of status).
@@ -119,6 +117,10 @@ final class NovaCPU {
                 throw NovaTrap.timerInterrupt
             }
         }
+
+        let opcode = try memory.read8(pc)
+        pc &+= 1
+        cycle &+= 1
 
         switch opcode {
         // ---- Stack manipulation ----
