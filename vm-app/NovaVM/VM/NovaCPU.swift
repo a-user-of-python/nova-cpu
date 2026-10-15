@@ -470,10 +470,10 @@ final class NovaCPU {
                 // Hardware timer interrupt vectoring (for firmware scheduler).
                 // If firmware has set timerVector, vector to it instead of halting.
                 // This is hardware behavior, not app control.
-                if trap == .timerInterrupt && memory.timerVector != 0 {
+                if (trap == .timerInterrupt || trap == .ecallU) && memory.timerVector != 0 {
                     // Save trap state
                     epc = pc
-                    cause = 0x8000000000000007  // Machine timer interrupt code
+                    cause = (trap == .ecallU) ? 8 : 0x8000000000000007
                     // Push epc and cause onto data stack for firmware handler
                     // (firmware has no CSRGET, so we pass via stack)
                     try? dpush(epc)
