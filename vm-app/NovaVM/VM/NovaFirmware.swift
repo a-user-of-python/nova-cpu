@@ -6,16 +6,46 @@ import Foundation
 /// Handles memory init, stack setup, trap vectors, and console I/O.
 struct NovaFirmware {
 
-    /// Default firmware: NovaShell (interactive shell), embedded below.
+    /// Default firmware: NovaShell (interactive shell).
     /// Runs at 0x0. Programs load at 0x1000 on top of it (via the app's
     /// program loader or NovaShell's `run <file>` command).
+    ///
+    /// The firmware lives as a FILE (not just embedded bytes): on launch the
+    /// app materializes the built-in image to `NOVA/firmware/novash.bin`, and
+    /// Run loads that file into guest memory. This is the demand-load
+    /// structure: firmware (and later, modules) come from storage, keeping
+    /// the app's resident memory low. Embedded bytes are the fallback.
+    static var defaultFirmwareURL: URL {
+        NovaFolders.firmwareDir.appendingPathComponent("novash.bin")
+    }
+
+    /// Materialize the built-in firmware to its file, refreshing when the
+    /// app version changed. Idempotent; never touches a user-replaced file
+    /// within the same app version.
+    static func refreshBuiltIn() {
+        let fm = FileManager.default
+        let url = defaultFirmwareURL
+        let verURL = NovaFolders.firmwareDir.appendingPathComponent("novash.bin.version")
+        let appVer = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
+        let stamped = (try? String(contentsOf: verURL, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if fm.fileExists(atPath: url.path) && stamped == appVer { return }
+        try? fm.createDirectory(at: NovaFolders.firmwareDir, withIntermediateDirectories: true)
+        if !novaShellBytes.isEmpty {
+            try? Data(novaShellBytes).write(to: url)
+            try? appVer.write(to: verURL, atomically: true, encoding: .utf8)
+        }
+    }
+
     static var defaultImage: Data {
-        // NovaShell is the default. The minimal JMP stub is kept as a
-        // fallback in case the embedded image is ever unavailable.
+        // Prefer the firmware FILE (demand-loaded from storage)...
+        if let data = try? Data(contentsOf: defaultFirmwareURL), !data.isEmpty {
+            return data
+        }
+        // ...fall back to embedded bytes...
         if !novaShellBytes.isEmpty {
             return Data(novaShellBytes)
         }
-        // Fallback: minimal JMP32 to 0x1000 (program entry).
+        // ...then to a minimal JMP32 stub to 0x1000 (program entry).
         var bytes = [UInt8]()
         bytes.append(0xA1) // JMP32
         let off = Int32(0x1000 - 5)

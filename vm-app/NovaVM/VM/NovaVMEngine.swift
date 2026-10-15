@@ -52,6 +52,7 @@ final class NovaVMEngine: ObservableObject {
         Self.logLaunch("init start")
         // Set up the on-device folder structure first.
         NovaFolders.setup()
+        NovaFirmware.refreshBuiltIn()
         Self.logLaunch("folders ok")
         let cfg = NovaFolders.loadOrCreateConfig()
         Self.logLaunch("config ok: \(cfg.ramMB)MB")
