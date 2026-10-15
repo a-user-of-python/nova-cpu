@@ -80,6 +80,7 @@ final class NovaVMEngine: ObservableObject {
 
         // Console output → published string (batched)
         memory.consoleOutput = { [weak self] s in
+            NovaMemory.debugLog("CONSOLE_STR len=\(s.count) str='\(s.replacingOccurrences(of: "\n", with: "\\n"))'")
             DispatchQueue.main.async {
                 self?.consoleText += s
                 // Cap console at ~100k chars
