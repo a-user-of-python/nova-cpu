@@ -211,30 +211,9 @@ final class NovaMemory {
     /// Buffer for assembling multi-byte UTF-8 sequences from MMIO writes.
     private var utf8Buffer = [UInt8]()
 
-    /// Debug: logs raw console/keyboard bytes to Documents/console-debug.log
-    private static let debugLock = NSLock()
-    static func debugLog(_ msg: String) {
-        debugLock.lock()
-        defer { debugLock.unlock() }
-        let url = NovaFolders.root.appendingPathComponent("console-debug.log")
-        let line = "[\(Date())] \(msg)\n"
-        if let data = line.data(using: .utf8) {
-            if FileManager.default.fileExists(atPath: url.path) {
-                if let h = try? FileHandle(forWritingTo: url) {
-                    h.seekToEndOfFile()
-                    h.write(data)
-                    try? h.close()
-                }
-            } else {
-                try? data.write(to: url)
-            }
-        }
-    }
-
     func mmioWrite(_ addr: UInt64, _ v: UInt64) {
         if addr == Self.consoleAddr {
             let byte = UInt8(v & 0xFF)
-            Self.debugLog("CONSOLE_OUT byte=\(byte) char='\(byte < 32 ? "\\u{\(String(byte, radix: 16))}" : String(UnicodeScalar(byte)))'")
             utf8Buffer.append(byte)
             if isCompleteUTF8(utf8Buffer), let s = String(bytes: utf8Buffer, encoding: .utf8) {
                 utf8Buffer.removeAll()
@@ -284,7 +263,6 @@ final class NovaMemory {
 
     /// Host pushes a key for the guest to read
     func pushKey(_ byte: UInt8) {
-        Self.debugLog("KEYBOARD_IN byte=\(byte) char='\(byte < 32 ? "\\u{\(String(byte, radix: 16))}" : String(UnicodeScalar(byte)))'")
         keyboardLock.lock()
         keyboardQueue.append(byte)
         keyboardLock.unlock()

@@ -16,6 +16,11 @@ final class NovaVMEngine: ObservableObject {
     private let cpu = NovaCPU()
     var memory: NovaMemory
     private var runThread: Thread?
+    /// Tracks the VM run thread so stop()/reboot() can wait for it to
+    /// actually exit before resetting state. Without this, the old thread
+    /// races the new one on CPU/memory state (caused stackUnderflow on
+    /// reboot while a program was running).
+    private let runGroup = DispatchGroup()
 
     // Live configuration (from NOVA/config.nova)
     @Published var config: NovaConfig
@@ -80,7 +85,6 @@ final class NovaVMEngine: ObservableObject {
 
         // Console output → published string (batched)
         memory.consoleOutput = { [weak self] s in
-            NovaMemory.debugLog("CONSOLE_STR len=\(s.count) str='\(s.replacingOccurrences(of: "\n", with: "\\n"))'")
             DispatchQueue.main.async {
                 self?.consoleText += s
                 // Cap console at ~100k chars
@@ -210,7 +214,6 @@ final class NovaVMEngine: ObservableObject {
     /// cmd 1 = LIST: arg0=buffer addr, arg1=buffer size → returns bytes written
     /// cmd 2 = READ: arg0=path addr (null-term), arg1=buffer addr, arg2=buffer size → returns bytes read or -1
     private func handleFileCommand(_ cmd: UInt64, arg0: UInt64, arg1: UInt64, arg2: UInt64) -> Int64 {
-        NovaMemory.debugLog("FILE_CMD cmd=\(cmd) arg0=\(arg0) arg1=\(arg1) arg2=\(arg2)")
         let shared = NovaFolders.sharedDir
         switch cmd {
         case 1: // LIST
@@ -246,15 +249,11 @@ final class NovaVMEngine: ObservableObject {
             guard let filename = String(bytes: pathBytes, encoding: .utf8),
                   !filename.contains(".."), !filename.contains("/") else { return -1 }
             let url = shared.appendingPathComponent(filename)
-            guard let data = try? Data(contentsOf: url) else {
-                NovaMemory.debugLog("FILE_READ fail filename='\(filename)' -> returning -1")
-                return -1
-            }
+            guard let data = try? Data(contentsOf: url) else { return -1 }
             let n = min(data.count, bufSize)
             for i in 0..<n {
                 try? memory.write8(bufAddr + UInt64(i), data[i])
             }
-            NovaMemory.debugLog("FILE_READ ok filename='\(filename)' bytes=\(n)")
             return Int64(n)
         default:
             return -1
@@ -288,7 +287,9 @@ final class NovaVMEngine: ObservableObject {
         let gen = runGeneration
         isRunning = true
         statusLine = "Running"
+        runGroup.enter()
         runThread = Thread { [weak self] in
+            defer { self?.runGroup.leave() }
             self?.cpu.run()
             DispatchQueue.main.async { [weak self] in
                 // Only update UI if this is still the current generation.
@@ -306,6 +307,10 @@ final class NovaVMEngine: ObservableObject {
 
     func stop() {
         cpu.running = false
+        // Wait for the VM thread to actually exit before we touch
+        // CPU/memory state. Prevents reboot races.
+        _ = runGroup.wait(timeout: .now() + 2.0)
+        runThread = nil
         isRunning = false
         statusLine = "Stopped"
         snapshotRegisters()
