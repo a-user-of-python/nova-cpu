@@ -70,8 +70,8 @@ final class NovaVMEngine: ObservableObject {
 
         // Wire up network MMIO handler: the app is the network "hardware".
         // Firmware drives it purely via MMIO (Nova machine code only).
-        memory.netHandler = { [weak self] urlAddr, bufAddr, bufSize in
-            return self?.handleNetGet(urlAddr: urlAddr, bufAddr: bufAddr, bufSize: bufSize) ?? -1
+        memory.netHandler = { [weak self] urlAddr, bufAddr, bufSize, cmd in
+            return self?.handleNetGet(urlAddr: urlAddr, bufAddr: bufAddr, bufSize: bufSize, cmd: cmd) ?? -1
         }
 
         // Wire stack pointers
@@ -135,8 +135,8 @@ final class NovaVMEngine: ObservableObject {
             newMem.fileHandler = { [weak self] cmd, arg0, arg1, arg2 in
                 return self?.handleFileCommand(cmd, arg0: arg0, arg1: arg1, arg2: arg2) ?? -1
             }
-            newMem.netHandler = { [weak self] urlAddr, bufAddr, bufSize in
-                return self?.handleNetGet(urlAddr: urlAddr, bufAddr: bufAddr, bufSize: bufSize) ?? -1
+            newMem.netHandler = { [weak self] urlAddr, bufAddr, bufSize, cmd in
+                return self?.handleNetGet(urlAddr: urlAddr, bufAddr: bufAddr, bufSize: bufSize, cmd: cmd) ?? -1
             }
             self.memory = newMem
             cpu.memory = newMem
@@ -224,7 +224,7 @@ final class NovaVMEngine: ObservableObject {
     /// cmd 2 = READ: arg0=path addr (null-term), arg1=buffer addr, arg2=buffer size → returns bytes read or -1
     /// Network "hardware": blocking HTTP GET for the firmware's MMIO network device.
     /// Runs on the VM thread (like a syscall). Only http/https URLs are allowed.
-    private func handleNetGet(urlAddr: UInt64, bufAddr: UInt64, bufSize: UInt64) -> Int64 {
+    private func handleNetGet(urlAddr: UInt64, bufAddr: UInt64, bufSize: UInt64, cmd: UInt64) -> Int64 {
         // Read NUL-terminated URL from guest memory
         var urlBytes: [UInt8] = []
         var p = urlAddr
@@ -242,7 +242,7 @@ final class NovaVMEngine: ObservableObject {
         guard maxBytes > 0 else { return 0 }
 
         var request = URLRequest(url: url)
-        request.timeoutInterval = 20
+        request.timeoutInterval = (cmd == 2) ? 5 : 20
         request.setValue("NovaVM/1.0", forHTTPHeaderField: "User-Agent")
 
         let sem = DispatchSemaphore(value: 0)
@@ -256,7 +256,7 @@ final class NovaVMEngine: ObservableObject {
         }.resume()
         // Wait up to ~25s (VM thread blocks like a syscall; UI stays responsive
         // only in that the main thread is untouched)
-        guard sem.wait(timeout: .now() + 25) == .success,
+        guard sem.wait(timeout: .now() + ((cmd == 2) ? 6 : 25)) == .success,
               box.error == nil,
               let data = box.data else { return -1 }
         let n = min(data.count, maxBytes)

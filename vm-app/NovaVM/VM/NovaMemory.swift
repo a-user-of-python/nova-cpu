@@ -221,7 +221,7 @@ final class NovaMemory {
     var netResult: Int64 = 0
     /// Host-side network handler: (urlAddr, bufAddr, bufSize) -> bytes written or -1.
     /// Set by the app; this is the "hardware" behind the MMIO network device.
-    var netHandler: ((UInt64, UInt64, UInt64) -> Int64)?
+    var netHandler: ((UInt64, UInt64, UInt64, UInt64) -> Int64)?
 
     /// Buffer for assembling multi-byte UTF-8 sequences from MMIO writes.
     private var utf8Buffer = [UInt8]()
@@ -258,8 +258,9 @@ final class NovaMemory {
             fileArg2 = v
         } else if addr == Self.netCmdAddr {
             // Execute network command synchronously (blocks VM thread like a syscall)
-            if v == 1, let handler = netHandler {
-                netResult = handler(netUrl, netBuf, netBufSize)
+            // v=1: GET (20s timeout), v=2: quick GET (5s timeout, for boot sync)
+            if (v == 1 || v == 2), let handler = netHandler {
+                netResult = handler(netUrl, netBuf, netBufSize, v)
             } else {
                 netResult = -1
             }
