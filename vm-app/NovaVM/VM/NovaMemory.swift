@@ -186,6 +186,10 @@ final class NovaMemory {
 
     /// Keyboard input queue (host pushes keys, guest pops via MMIO read)
     var keyboardQueue: [UInt8] = []
+    /// Guards keyboardQueue: pushKey runs on the main (UI) thread,
+    /// mmioRead runs on the VM thread. Without this, rapid input
+    /// corrupts the array and duplicates/drops bytes.
+    private let keyboardLock = NSLock()
 
     /// File operation handler (set by host)
     var fileHandler: ((UInt64, UInt64, UInt64, UInt64) -> Int64)?
@@ -241,6 +245,8 @@ final class NovaMemory {
 
     func mmioRead(_ addr: UInt64) -> UInt64 {
         if addr == Self.keyboardAddr {
+            keyboardLock.lock()
+            defer { keyboardLock.unlock() }
             return keyboardQueue.isEmpty ? 0 : UInt64(keyboardQueue.removeFirst())
         } else if addr == Self.fileResultAddr {
             return UInt64(bitPattern: fileResult)
@@ -256,7 +262,16 @@ final class NovaMemory {
 
     /// Host pushes a key for the guest to read
     func pushKey(_ byte: UInt8) {
+        keyboardLock.lock()
         keyboardQueue.append(byte)
+        keyboardLock.unlock()
+    }
+
+    /// Clears pending keyboard input (used on reboot).
+    func clearKeyboardQueue() {
+        keyboardLock.lock()
+        keyboardQueue.removeAll()
+        keyboardLock.unlock()
     }
 
     /// Returns true if bytes form complete UTF-8 sequences (not cut mid-character).

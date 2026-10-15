@@ -136,7 +136,7 @@ struct VMView: View {
                     sendKeys()
                 })
                 .textFieldStyle(RoundedBorderTextFieldStyle())
-                .font(.system(size: 18))
+                .font(.system(size: 22))
                 .autocapitalization(appSettings.keyboardAutocapitalization ? .sentences : .none)
                 .disableAutocorrection(!appSettings.keyboardAutocorrection)
                 Button("Send") { haptic(); sendKeys() }

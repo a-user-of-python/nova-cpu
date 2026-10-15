@@ -8,6 +8,8 @@ import Combine
 final class NovaVMEngine: ObservableObject {
 
     @Published var consoleText: String = ""
+    /// Generation counter to invalidate stale thread completions after reboot.
+    private var runGeneration = 0
     @Published var isRunning: Bool = false
     @Published var statusLine: String = "Idle"
 
@@ -276,14 +278,19 @@ final class NovaVMEngine: ObservableObject {
 
     func start() {
         guard !cpu.running else { return }
+        runGeneration += 1
+        let gen = runGeneration
         isRunning = true
         statusLine = "Running"
         runThread = Thread { [weak self] in
             self?.cpu.run()
-            DispatchQueue.main.async {
-                self?.isRunning = false
-                self?.statusLine = "Halted"
-                self?.snapshotRegisters()
+            DispatchQueue.main.async { [weak self] in
+                // Only update UI if this is still the current generation.
+                // Prevents a stale thread from overwriting state after reboot.
+                guard let self = self, self.runGeneration == gen else { return }
+                self.isRunning = false
+                self.statusLine = "Halted"
+                self.snapshotRegisters()
             }
         }
         runThread?.name = "NOVA-VM"
@@ -310,6 +317,11 @@ final class NovaVMEngine: ObservableObject {
     /// Use this when the VM is halted and you want a fresh boot.
     func reboot() {
         stop()
+        // Clear any pending input and timer state from the old session.
+        // Prevents stale keys/timer from corrupting the fresh boot.
+        memory.clearKeyboardQueue()
+        memory.timerVector = 0
+        memory.timerCount = 0
         resetCPUState()
         // Reload firmware bytes into memory at 0x0
         if useFirmware {
