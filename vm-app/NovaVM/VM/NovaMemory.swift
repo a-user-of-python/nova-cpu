@@ -212,7 +212,10 @@ final class NovaMemory {
     private var utf8Buffer = [UInt8]()
 
     /// Debug: logs raw console/keyboard bytes to Documents/console-debug.log
+    private static let debugLock = NSLock()
     static func debugLog(_ msg: String) {
+        debugLock.lock()
+        defer { debugLock.unlock() }
         let url = NovaFolders.root.appendingPathComponent("console-debug.log")
         let line = "[\(Date())] \(msg)\n"
         if let data = line.data(using: .utf8) {

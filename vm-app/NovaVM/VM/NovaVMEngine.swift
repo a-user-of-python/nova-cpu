@@ -210,6 +210,7 @@ final class NovaVMEngine: ObservableObject {
     /// cmd 1 = LIST: arg0=buffer addr, arg1=buffer size → returns bytes written
     /// cmd 2 = READ: arg0=path addr (null-term), arg1=buffer addr, arg2=buffer size → returns bytes read or -1
     private func handleFileCommand(_ cmd: UInt64, arg0: UInt64, arg1: UInt64, arg2: UInt64) -> Int64 {
+        NovaMemory.debugLog("FILE_CMD cmd=\(cmd) arg0=\(arg0) arg1=\(arg1) arg2=\(arg2)")
         let shared = NovaFolders.sharedDir
         switch cmd {
         case 1: // LIST
@@ -245,11 +246,15 @@ final class NovaVMEngine: ObservableObject {
             guard let filename = String(bytes: pathBytes, encoding: .utf8),
                   !filename.contains(".."), !filename.contains("/") else { return -1 }
             let url = shared.appendingPathComponent(filename)
-            guard let data = try? Data(contentsOf: url) else { return -1 }
+            guard let data = try? Data(contentsOf: url) else {
+                NovaMemory.debugLog("FILE_READ fail filename='\(filename)' -> returning -1")
+                return -1
+            }
             let n = min(data.count, bufSize)
             for i in 0..<n {
                 try? memory.write8(bufAddr + UInt64(i), data[i])
             }
+            NovaMemory.debugLog("FILE_READ ok filename='\(filename)' bytes=\(n)")
             return Int64(n)
         default:
             return -1
