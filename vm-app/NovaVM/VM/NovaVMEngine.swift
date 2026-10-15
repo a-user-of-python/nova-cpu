@@ -309,6 +309,33 @@ final class NovaVMEngine: ObservableObject {
                 try? memory.write8(bufAddr + UInt64(i), data[i])
             }
             return Int64(n)
+        case 3: // WRITE: arg0=path addr (null-term), arg1=buffer addr, arg2=byte count → bytes written or -1
+            let pathAddr = arg0, bufAddr = arg1
+            let count = Int(min(arg2, 10_000_000))
+            guard count >= 0 else { return -1 }
+            var pathBytes: [UInt8] = []
+            var p = pathAddr
+            for _ in 0..<256 {
+                guard let b = try? memory.read8(p) else { break }
+                if b == 0 { break }
+                pathBytes.append(b)
+                p += 1
+            }
+            guard let filename = String(bytes: pathBytes, encoding: .utf8),
+                  !filename.contains(".."), !filename.contains("/") else { return -1 }
+            var bytes = [UInt8]()
+            bytes.reserveCapacity(count)
+            for i in 0..<count {
+                guard let b = try? memory.read8(bufAddr + UInt64(i)) else { break }
+                bytes.append(b)
+            }
+            let url = shared.appendingPathComponent(filename)
+            do {
+                try Data(bytes).write(to: url, options: .atomic)
+                return Int64(bytes.count)
+            } catch {
+                return -1
+            }
         default:
             return -1
         }
