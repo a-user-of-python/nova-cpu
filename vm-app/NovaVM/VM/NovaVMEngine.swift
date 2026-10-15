@@ -351,17 +351,8 @@ final class NovaVMEngine: ObservableObject {
             consoleText = ""
             statusLine = "Booting NovaShell..."
             start()
-            // Auto-run the selected program through the shell, so the
-            // firmware scheduler manages it (same as typing `run <file>`).
-            if let progName = selectedProgramName {
-                ensureProgramInSharedDir(progName)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                    guard let self = self, self.isRunning else { return }
-                    for byte in "run \(progName)\n".utf8 {
-                        self.memory.pushKey(byte)
-                    }
-                }
-            }
+            // NOTE: No auto-run. The user types `run <file>` manually.
+            // The old auto-typing raced with manual input and corrupted it.
         } else if let progData = selectedProgramData {
             // No firmware: run the program binary directly at 0x0.
             try? memory.loadBytes(progData, at: 0)

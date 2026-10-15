@@ -37,8 +37,21 @@ struct MainTabView: View {
                 }
         }
         .font(.headline)
+        .modifier(BottomTabBarModifier())
         .toolbarBackground(.visible, for: .tabBar)
         .toolbarBackground(.ultraThinMaterial, for: .tabBar)
         .environmentObject(appSettings)
+    }
+}
+
+/// Forces the tab bar to the bottom on iPad (iOS 18+).
+/// On iOS 17, the system default is used.
+struct BottomTabBarModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 18, *) {
+            content.tabViewStyle(.tabBarOnly)
+        } else {
+            content
+        }
     }
 }
