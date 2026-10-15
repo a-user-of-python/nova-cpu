@@ -68,6 +68,12 @@ final class NovaVMEngine: ObservableObject {
             return self?.handleFileCommand(cmd, arg0: arg0, arg1: arg1, arg2: arg2) ?? -1
         }
 
+        // Wire up network MMIO handler: the app is the network "hardware".
+        // Firmware drives it purely via MMIO (Nova machine code only).
+        memory.netHandler = { [weak self] urlAddr, bufAddr, bufSize in
+            return self?.handleNetGet(urlAddr: urlAddr, bufAddr: bufAddr, bufSize: bufSize) ?? -1
+        }
+
         // Wire stack pointers
         resetCPUState()
         Self.logLaunch("cpu state ok")
@@ -128,6 +134,9 @@ final class NovaVMEngine: ObservableObject {
             newMem.consoleOutput = memory.consoleOutput
             newMem.fileHandler = { [weak self] cmd, arg0, arg1, arg2 in
                 return self?.handleFileCommand(cmd, arg0: arg0, arg1: arg1, arg2: arg2) ?? -1
+            }
+            newMem.netHandler = { [weak self] urlAddr, bufAddr, bufSize in
+                return self?.handleNetGet(urlAddr: urlAddr, bufAddr: bufAddr, bufSize: bufSize) ?? -1
             }
             self.memory = newMem
             cpu.memory = newMem
@@ -213,6 +222,50 @@ final class NovaVMEngine: ObservableObject {
     /// Handle file commands from firmware. Runs on VM thread — keep it fast and safe.
     /// cmd 1 = LIST: arg0=buffer addr, arg1=buffer size → returns bytes written
     /// cmd 2 = READ: arg0=path addr (null-term), arg1=buffer addr, arg2=buffer size → returns bytes read or -1
+    /// Network "hardware": blocking HTTP GET for the firmware's MMIO network device.
+    /// Runs on the VM thread (like a syscall). Only http/https URLs are allowed.
+    private func handleNetGet(urlAddr: UInt64, bufAddr: UInt64, bufSize: UInt64) -> Int64 {
+        // Read NUL-terminated URL from guest memory
+        var urlBytes: [UInt8] = []
+        var p = urlAddr
+        for _ in 0..<2048 { // max URL length
+            guard let b = try? memory.read8(p) else { break }
+            if b == 0 { break }
+            urlBytes.append(b)
+            p += 1
+        }
+        guard let urlStr = String(bytes: urlBytes, encoding: .utf8),
+              let url = URL(string: urlStr),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else { return -1 }
+        let maxBytes = Int(min(bufSize, 1_000_000)) // cap at 1MB
+        guard maxBytes > 0 else { return 0 }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 20
+        request.setValue("NovaVM/1.0", forHTTPHeaderField: "User-Agent")
+
+        let sem = DispatchSemaphore(value: 0)
+        // Use a box to avoid Swift 6 concurrency warnings on captured vars
+        final class Box { var data: Data?; var error: Error? }
+        let box = Box()
+        URLSession.shared.dataTask(with: request) { data, _, error in
+            box.data = data
+            box.error = error
+            sem.signal()
+        }.resume()
+        // Wait up to ~25s (VM thread blocks like a syscall; UI stays responsive
+        // only in that the main thread is untouched)
+        guard sem.wait(timeout: .now() + 25) == .success,
+              box.error == nil,
+              let data = box.data else { return -1 }
+        let n = min(data.count, maxBytes)
+        for i in 0..<n {
+            try? memory.write8(bufAddr + UInt64(i), data[i])
+        }
+        return Int64(n)
+    }
+
     private func handleFileCommand(_ cmd: UInt64, arg0: UInt64, arg1: UInt64, arg2: UInt64) -> Int64 {
         let shared = NovaFolders.sharedDir
         switch cmd {

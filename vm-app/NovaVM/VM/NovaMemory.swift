@@ -181,6 +181,13 @@ final class NovaMemory {
     // Timer vector: firmware writes its handler address here (like mtvec).
     // On timer interrupt, the CPU jumps to this address.
     static let timerVectorAddr: UInt64 = 0xFFFF_FFFF_FFFF_0050
+    // Network device (HTTP GET). App implements the hardware; firmware
+    // drives it purely in Nova machine code via these MMIO registers.
+    static let netCmdAddr: UInt64 = 0xFFFF_FFFF_FFFF_0058      // write 1 = GET
+    static let netUrlAddr: UInt64 = 0xFFFF_FFFF_FFFF_0060      // guest addr of NUL-terminated URL
+    static let netBufAddr: UInt64 = 0xFFFF_FFFF_FFFF_0068      // guest addr of response buffer
+    static let netBufSizeAddr: UInt64 = 0xFFFF_FFFF_FFFF_0070  // max response bytes
+    static let netResultAddr: UInt64 = 0xFFFF_FFFF_FFFF_0078   // bytes written, or -1 on error
 
     var consoleOutput: ((String) -> Void)?
 
@@ -207,6 +214,14 @@ final class NovaMemory {
     var timerCount: UInt64 = 0
     /// Timer vector: firmware's handler address (like mtvec). Set via MMIO.
     var timerVector: UInt64 = 0
+    // Network device state
+    var netUrl: UInt64 = 0
+    var netBuf: UInt64 = 0
+    var netBufSize: UInt64 = 0
+    var netResult: Int64 = 0
+    /// Host-side network handler: (urlAddr, bufAddr, bufSize) -> bytes written or -1.
+    /// Set by the app; this is the "hardware" behind the MMIO network device.
+    var netHandler: ((UInt64, UInt64, UInt64) -> Int64)?
 
     /// Buffer for assembling multi-byte UTF-8 sequences from MMIO writes.
     private var utf8Buffer = [UInt8]()
@@ -241,6 +256,19 @@ final class NovaMemory {
             fileArg1 = v
         } else if addr == Self.fileArg2Addr {
             fileArg2 = v
+        } else if addr == Self.netCmdAddr {
+            // Execute network command synchronously (blocks VM thread like a syscall)
+            if v == 1, let handler = netHandler {
+                netResult = handler(netUrl, netBuf, netBufSize)
+            } else {
+                netResult = -1
+            }
+        } else if addr == Self.netUrlAddr {
+            netUrl = v
+        } else if addr == Self.netBufAddr {
+            netBuf = v
+        } else if addr == Self.netBufSizeAddr {
+            netBufSize = v
         }
     }
 
@@ -257,6 +285,8 @@ final class NovaMemory {
             return timerInterval
         } else if addr == Self.timerVectorAddr {
             return timerVector
+        } else if addr == Self.netResultAddr {
+            return UInt64(bitPattern: netResult)
         }
         return 0
     }
