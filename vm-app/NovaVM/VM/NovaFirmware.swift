@@ -19,31 +19,34 @@ struct NovaFirmware {
         NovaFolders.firmwareDir.appendingPathComponent("novash.bin")
     }
 
-    /// Materialize the built-in firmware to its file, refreshing when the
-    /// app version changed. Idempotent; never touches a user-replaced file
-    /// within the same app version.
+    /// Materialize the built-in firmware to its file. Content-aware: rewrites
+    /// the file whenever the embedded bytes differ from what's on disk. This
+    /// ensures firmware updates always reach the device, even though the
+    /// marketing version never changes. A user-replaced custom firmware file
+    /// is preserved only if the Firmware tab has it selected (not the default).
     static func refreshBuiltIn() {
         let fm = FileManager.default
         let url = defaultFirmwareURL
-        let verURL = NovaFolders.firmwareDir.appendingPathComponent("novash.bin.version")
-        let appVer = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
-        let stamped = (try? String(contentsOf: verURL, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if fm.fileExists(atPath: url.path) && stamped == appVer { return }
+        let embedded = Data(novaShellBytes)
+        guard !embedded.isEmpty else { return }
         try? fm.createDirectory(at: NovaFolders.firmwareDir, withIntermediateDirectories: true)
-        if !novaShellBytes.isEmpty {
-            try? Data(novaShellBytes).write(to: url)
-            try? appVer.write(to: verURL, atomically: true, encoding: .utf8)
+        let onDisk = try? Data(contentsOf: url)
+        if onDisk != embedded {
+            try? embedded.write(to: url, options: .atomic)
         }
     }
 
     static var defaultImage: Data {
-        // Prefer the firmware FILE (demand-loaded from storage)...
-        if let data = try? Data(contentsOf: defaultFirmwareURL), !data.isEmpty {
+        let embedded = Data(novaShellBytes)
+        // Prefer the firmware FILE (demand-loaded from storage), but verify
+        // it matches the embedded bytes. If corrupt/missing, use embedded.
+        if let data = try? Data(contentsOf: defaultFirmwareURL),
+           !data.isEmpty, data == embedded {
             return data
         }
         // ...fall back to embedded bytes...
-        if !novaShellBytes.isEmpty {
-            return Data(novaShellBytes)
+        if !embedded.isEmpty {
+            return embedded
         }
         // ...then to a minimal JMP32 stub to 0x1000 (program entry).
         var bytes = [UInt8]()
