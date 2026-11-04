@@ -51,6 +51,21 @@ final class NovaCPU {
     var running = false
     var trapHandler: ((NovaTrap, UInt64) -> Void)?
 
+    // [JIT J1 — ADDITION 1] Engine indicator surface (design §2.3).
+    // requestedEngine is set by the host (harness --engine flag; the
+    // app in lane J5). activeEngine is rewritten by
+    // selectEngineForRun at every run() entry with what that run
+    // actually used — this is the value an indicator shows.
+    // jitStats is non-nil only for runs where .jit was requested.
+    var requestedEngine: NovaEnginePreference = .interpreter
+    private(set) var activeEngine: NovaActiveEngine = .interpreterHotloop
+    private(set) var jitStats: JitStats? = nil
+    // [JIT J4 — ADDITION 5] D3 console callout switch (design §8
+    // D3): true = compiled STORE8/STORE64 to the console address
+    // call NovaMemory.mmioWrite directly; false = the J3 peek-exit
+    // for every MMIO store. Only the JIT compiler reads this.
+    var jitD3Enabled: Bool = true
+
     // General-purpose registers R0–R15 (programmer-visible)
     var regs: [UInt64] = Array(repeating: 0, count: 16)
 
@@ -1247,7 +1262,54 @@ final class NovaCPU {
 
     // MARK: - Run loop
 
+    // [JIT J1 — ADDITION 3] Engine selection + runtime gate
+    // (design §2.1/§2.2). Called once at every run() entry.
+    // Returns true only if the JIT trampoline drove the whole run
+    // (and has already synced object state, as hotRun does).
+    //
+    // J1 behaviour: when .jit is requested, the probe runs and its
+    // result is recorded (NovaJIT.lastProbe), a fresh zeroed
+    // JitStats is installed, and the trampoline is offered the run —
+    // but it compiles zero blocks and always declines, so this
+    // returns false and activeEngine truthfully stays
+    // .interpreterHotloop for a run the interpreter drove. When the
+    // probe fails, same result, silently. When .jit is not
+    // requested, nothing but the activeEngine/jitStats resets runs.
+    // [JIT J2 — ADDITION 4] Trampoline bridges. handleTrapAfterStep
+    // is `private` (file-scoped) and jitStats' setter is
+    // `private(set)`, so NovaJIT.swift cannot reach either directly;
+    // these two internal wrappers expose exactly those operations
+    // to the trampoline and nothing else. Used only by
+    // NovaJIT.runTrampoline.
+    func jitHandleTrapAfterStep(_ trap: NovaTrap) {
+        handleTrapAfterStep(trap)
+    }
+    func jitSetStats(_ s: JitStats) {
+        jitStats = s
+    }
+
+    private func selectEngineForRun(maxSteps: UInt64) -> Bool {
+        activeEngine = .interpreterHotloop
+        guard requestedEngine == .jit else {
+            jitStats = nil
+            return false
+        }
+        jitStats = JitStats()
+        guard case .available(let path) = NovaJIT.probe() else {
+            return false
+        }
+        if NovaJIT.runTrampoline(cpu: self, maxSteps: maxSteps) {
+            activeEngine = .jit(path: path)
+            return true
+        }
+        return false
+    }
+
     func run(maxSteps: UInt64 = .max) {
+        // [JIT J1 — ADDITION 2] Probe + dispatch hook (see banner).
+        // In J1 this never takes the run over; execution falls
+        // through to the shipped body below, unchanged.
+        if selectEngineForRun(maxSteps: maxSteps) { return }
         running = true
         var steps: UInt64 = 0
         while running && steps < maxSteps {

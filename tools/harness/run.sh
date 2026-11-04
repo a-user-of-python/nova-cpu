@@ -103,7 +103,19 @@ build_harness() {
   fi
   echo "== Building harness against $kind core -> $out"
   echo "interpreter" > "$out.engine"
-  "${SWIFTC[@]}" -O -o "$out" "$HARNESS_DIR/main.swift" "$cpu" "$mem"
+  # J5 promotion: the current (shipping) core's NovaCPU.swift now
+  # references NovaJIT.swift, which lives beside it in vm-app — add
+  # it to the swiftc line when present so the plain gate compiles
+  # the promoted core. No NOVA_JIT_ENGINE define: the plain gate
+  # still runs the interpreter path (the .engine marker above stays
+  # "interpreter"); the JIT path against the promoted files is
+  # exercised via: gate-variant vm-app/NovaVM/VM
+  local extra_src=""
+  if [ "$kind" != "baseline" ] && [ -f "$ROOT/vm-app/NovaVM/VM/NovaJIT.swift" ]; then
+    extra_src="$ROOT/vm-app/NovaVM/VM/NovaJIT.swift"
+  fi
+  # extra_src is intentionally unquoted (single token, empty pre-J5).
+  "${SWIFTC[@]}" -O -o "$out" "$HARNESS_DIR/main.swift" "$cpu" "$mem" $extra_src
 }
 
 # build_harness_dir <variant-dir> <output-binary>
