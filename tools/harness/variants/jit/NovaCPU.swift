@@ -32,6 +32,11 @@ import Foundation
 //     it installs a fresh zeroed JitStats and runs the §2.2 probe
 //     (NovaJIT.probe(), recorded in NovaJIT.lastProbe). When .jit
 //     is NOT requested it does nothing else at all.
+//   ADDITION 4 (lane J2) — two internal trampoline bridges just
+//     above selectEngineForRun: jitHandleTrapAfterStep (the trap
+//     handler is file-private) and jitSetStats (jitStats' setter is
+//     private(set)). No other change; from J2 the trampoline really
+//     drives runs when the probe succeeds.
 //
 // Everything else — step(), hotRun(), handleTrapAfterStep(), the
 // whole interpreter — is byte-identical to the shipped core, and
@@ -1298,6 +1303,19 @@ final class NovaCPU {
     // .interpreterHotloop for a run the interpreter drove. When the
     // probe fails, same result, silently. When .jit is not
     // requested, nothing but the activeEngine/jitStats resets runs.
+    // [JIT J2 — ADDITION 4] Trampoline bridges. handleTrapAfterStep
+    // is `private` (file-scoped) and jitStats' setter is
+    // `private(set)`, so NovaJIT.swift cannot reach either directly;
+    // these two internal wrappers expose exactly those operations
+    // to the trampoline and nothing else. Used only by
+    // NovaJIT.runTrampoline.
+    func jitHandleTrapAfterStep(_ trap: NovaTrap) {
+        handleTrapAfterStep(trap)
+    }
+    func jitSetStats(_ s: JitStats) {
+        jitStats = s
+    }
+
     private func selectEngineForRun(maxSteps: UInt64) -> Bool {
         activeEngine = .interpreterHotloop
         guard requestedEngine == .jit else {

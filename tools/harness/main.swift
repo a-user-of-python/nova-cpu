@@ -324,6 +324,15 @@ if engineArg == "jit" {
     let activeLabel = cpu.activeEngine.label
     eprint("nova-harness: engine=jit probe=\(probeLabel) active=\(activeLabel)")
     metaSuffix = "engine_requested=jit\nengine_active=\(activeLabel)\njit_probe=\(probeLabel)\n"
+    // J2: JIT evidence line — proves compiled code actually ran
+    // (blocks compiled + native guest instructions executed +
+    // exits by reason). A run that silently fell back everywhere
+    // shows nativeInstructions=0 here.
+    if let s = cpu.jitStats {
+        let statsLine = "blocksCompiled=\(s.blocksCompiled) blockEntries=\(s.blockEntries) nativeInstructions=\(s.nativeInstructions) singleSteps=\(s.singleSteps) faultExits=\(s.faultExits) limitExits=\(s.limitExits) invalidations=\(s.invalidations)"
+        eprint("nova-harness: jitStats \(statsLine)")
+        metaSuffix += "jit_stats=\(statsLine)\n"
+    }
 }
 #endif
 

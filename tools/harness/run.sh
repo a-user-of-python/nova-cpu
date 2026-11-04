@@ -161,6 +161,7 @@ run_one() {
   # Surface the JIT probe result in the gate log (JIT binaries only).
   if [ -f "$bin.engine" ] && [ "$(cat "$bin.engine")" = "jit" ]; then
     echo "  [$name] $(grep '^jit_probe=' "$out/$name.meta" | head -1) $(grep '^engine_active=' "$out/$name.meta" | head -1)"
+    echo "  [$name] $(grep '^jit_stats=' "$out/$name.meta" | head -1)"
   fi
   grep '^cycles=' "$out/$name.meta" | cut -d= -f2  > "$out/$name.cycles"
   grep '^halt='   "$out/$name.meta" | cut -d= -f2- > "$out/$name.halt"
@@ -300,6 +301,28 @@ cmd_gate_variant() {
     [ "$status" = "FAIL" ] && fail=1
   done
   if [ $fail -eq 0 ]; then echo "== GATE ($vname): all programs match the golden baseline"; else echo "== GATE ($vname): MISMATCHES FOUND"; fi
+  # J2 evidence step (jit variant only): run the speed-only bench
+  # workload once under --engine jit with the just-built binary and
+  # print its console + meta verbatim. bench is NOT a golden (its
+  # printed rates derive from RDTIME, wall-clock), but its section
+  # counts are deterministic. This step is evidence, not a gate: its
+  # result never changes the gate's exit status.
+  if [ "$vname" = "jit" ]; then
+    local bbin="$BUILD_DIR/nova-harness-variant-$vname"
+    local bout="$BUILD_DIR/bench-jit-out"
+    mkdir -p "$bout"
+    echo "== BENCH under --engine jit (evidence only, not gated)"
+    "$bbin" --program "$BIN_DIR/bench.bin" --load-addr 0 --steps 200000000 \
+        --engine jit --console-out "$bout/bench.console" --meta-out "$bout/bench.meta" \
+        >"$bout/bench.stdout" 2>"$bout/bench.stderr" || true
+    echo "--- bench stdout: $(cat "$bout/bench.stdout" 2>/dev/null)"
+    echo "--- bench stderr: $(cat "$bout/bench.stderr" 2>/dev/null)"
+    echo "--- bench meta:"
+    cat "$bout/bench.meta" 2>/dev/null || true
+    echo "--- bench console:"
+    cat "$bout/bench.console" 2>/dev/null || true
+    echo "--- end bench"
+  fi
   return $fail
 }
 
