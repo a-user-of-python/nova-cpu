@@ -82,6 +82,7 @@ var inputFile: String? = nil
 var sandboxPath: String? = nil
 var consoleOutPath: String? = nil
 var metaOutPath: String? = nil
+var engineArg: String = "interpreter"
 
 let argv = CommandLine.arguments
 var ai = 1
@@ -107,8 +108,9 @@ while ai < argv.count {
     case "--sandbox": sandboxPath = nextVal(a)
     case "--console-out": consoleOutPath = nextVal(a)
     case "--meta-out": metaOutPath = nextVal(a)
+    case "--engine": engineArg = nextVal(a)
     case "--help":
-        print("usage: nova-harness --program P.bin [--firmware F.bin] [--load-addr N] [--entry N] [--r15 N] [--steps N] [--ram-mb N] [--timer-interval N] [--input TEXT] [--input-hex HEX] [--input-file F] [--sandbox DIR] --console-out FILE --meta-out FILE")
+        print("usage: nova-harness --program P.bin [--firmware F.bin] [--load-addr N] [--entry N] [--r15 N] [--steps N] [--ram-mb N] [--timer-interval N] [--input TEXT] [--input-hex HEX] [--input-file F] [--sandbox DIR] [--engine interpreter|jit] --console-out FILE --meta-out FILE")
         exit(0)
     default:
         die("unknown argument: \(a)")
@@ -123,9 +125,27 @@ guard ramMB >= 64 && ramMB <= 1024 else { die("--ram-mb must be in [64, 1024]") 
 
 // MARK: - VM construction (mirrors NovaVMEngine.init)
 
+guard engineArg == "interpreter" || engineArg == "jit" else {
+    die("--engine must be interpreter or jit")
+}
+
 let memory = NovaMemory(totalSize: Int(ramMB) * 1024 * 1024)
 let cpu = NovaCPU()
 cpu.memory = memory
+
+// Engine selection (v0.0.71 J1, design §7.1): default interpreter —
+// every pre-J1 invocation is byte-unchanged. The JIT hooks exist
+// only in the variants/jit core, so JIT-specific code is compiled
+// only when run.sh defines NOVA_JIT_ENGINE (it does so exactly when
+// the variant dir carries NovaJIT.swift). Asking a non-JIT binary
+// for the JIT engine is a usage error, never a silent fallback.
+if engineArg == "jit" {
+#if NOVA_JIT_ENGINE
+    cpu.requestedEngine = .jit
+#else
+    die("--engine jit requires a harness built from the JIT variant core (variants/jit)")
+#endif
+}
 
 // Console capture: raw guest bytes. NovaMemory assembles complete UTF-8
 // sequences before calling this, exactly as it does for the app; a trailing
@@ -291,6 +311,22 @@ for b in inputBytes { memory.pushKey(b) }
 
 cpu.run(maxSteps: maxSteps)
 
+// JIT probe/engine report (J1): extra meta lines + a stderr line,
+// ONLY when --engine jit was given (and only compilable in JIT
+// builds). The probe ran at run() entry (design §2.2); lastProbe
+// records which allocation path won or why JIT is unavailable.
+// Default (interpreter) runs gain no lines anywhere — meta, stdout
+// and stderr are byte-identical to pre-J1 harness builds.
+var metaSuffix = ""
+#if NOVA_JIT_ENGINE
+if engineArg == "jit" {
+    let probeLabel = NovaJIT.lastProbe.label
+    let activeLabel = cpu.activeEngine.label
+    eprint("nova-harness: engine=jit probe=\(probeLabel) active=\(activeLabel)")
+    metaSuffix = "engine_requested=jit\nengine_active=\(activeLabel)\njit_probe=\(probeLabel)\n"
+}
+#endif
+
 // MARK: - Halt classification
 //
 // NovaCPU.run() gives no return value, so the reason is reconstructed from
@@ -325,7 +361,7 @@ console_bytes=\(consoleBytes.count)
 pc=0x\(String(cpu.pc, radix: 16))
 """
 do {
-    try Data((meta + "\n").utf8).write(to: URL(fileURLWithPath: metaOut))
+    try Data((meta + "\n" + metaSuffix).utf8).write(to: URL(fileURLWithPath: metaOut))
 } catch {
     die("cannot write meta output: \(metaOut)")
 }

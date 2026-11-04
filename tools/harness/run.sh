@@ -102,6 +102,7 @@ build_harness() {
     mem="$ROOT/vm-app/NovaVM/VM/NovaMemory.swift"
   fi
   echo "== Building harness against $kind core -> $out"
+  echo "interpreter" > "$out.engine"
   "${SWIFTC[@]}" -O -o "$out" "$HARNESS_DIR/main.swift" "$cpu" "$mem"
 }
 
@@ -110,6 +111,12 @@ build_harness() {
 # NovaCPU.swift, plus its NovaMemory.swift when it carries one,
 # otherwise the current vm-app NovaMemory.swift (variants that only
 # change the CPU share the shipping memory core).
+# JIT variants (v0.0.71 J1, design §7.1): when the directory carries
+# a NovaJIT.swift it is added to the swiftc line, the build defines
+# NOVA_JIT_ENGINE (which enables the harness's --engine jit hooks in
+# main.swift), and a "<binary>.engine" marker records "jit" so
+# run_one passes --engine jit for this binary. Other variants are
+# built exactly as before and get an "interpreter" marker.
 build_harness_dir() {
   local dir="$1" out="$2" cpu mem
   cpu="$dir/NovaCPU.swift"
@@ -118,8 +125,18 @@ build_harness_dir() {
   else
     mem="$ROOT/vm-app/NovaVM/VM/NovaMemory.swift"
   fi
+  local extra_src="" extra_def=""
+  if [ -f "$dir/NovaJIT.swift" ]; then
+    extra_src="$dir/NovaJIT.swift"
+    extra_def="-D NOVA_JIT_ENGINE"
+    echo "jit" > "$out.engine"
+  else
+    echo "interpreter" > "$out.engine"
+  fi
   echo "== Building harness against variant core $dir -> $out"
-  "${SWIFTC[@]}" -O -o "$out" "$HARNESS_DIR/main.swift" "$cpu" "$mem"
+  # extra_def/extra_src are intentionally unquoted (single tokens,
+  # empty for non-JIT variants).
+  "${SWIFTC[@]}" -O $extra_def -o "$out" "$HARNESS_DIR/main.swift" "$cpu" "$mem" $extra_src
 }
 
 # run_one <harness-binary> <case> <outdir>
@@ -128,6 +145,11 @@ run_one() {
   local bin="$1" name="$2" out="$3"
   mkdir -p "$out"
   set_case_args "$name" || return 1
+  # JIT binaries (see build_harness_dir's .engine marker) run with
+  # --engine jit; every other binary's invocation is unchanged.
+  if [ -f "$bin.engine" ] && [ "$(cat "$bin.engine")" = "jit" ]; then
+    ARGS+=(--engine jit)
+  fi
   "$bin" "${ARGS[@]}" --console-out "$out/$name.console" --meta-out "$out/$name.meta" \
       >"$out/$name.stdout" 2>"$out/$name.stderr"
   local rc=$?
@@ -135,6 +157,10 @@ run_one() {
     echo "run.sh: harness failed for $name (rc=$rc)" >&2
     cat "$out/$name.stderr" >&2
     return 1
+  fi
+  # Surface the JIT probe result in the gate log (JIT binaries only).
+  if [ -f "$bin.engine" ] && [ "$(cat "$bin.engine")" = "jit" ]; then
+    echo "  [$name] $(grep '^jit_probe=' "$out/$name.meta" | head -1) $(grep '^engine_active=' "$out/$name.meta" | head -1)"
   fi
   grep '^cycles=' "$out/$name.meta" | cut -d= -f2  > "$out/$name.cycles"
   grep '^halt='   "$out/$name.meta" | cut -d= -f2- > "$out/$name.halt"
