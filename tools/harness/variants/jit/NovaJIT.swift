@@ -4,8 +4,13 @@
 // codegen (AArch64 emitter + block compiler for the stack and
 // integer-ALU groups + the full §5 exactness trampoline — see the
 // JitBlockCompiler / runTrampoline sections and agent_notes/
-// v071-j2.md). Everything outside those two groups still ends a
-// block before the instruction and is single-stepped via step().
+// v071-j2.md). Lane J3 added the memory group (inline RAM
+// loads/stores with MMIO peek-exits and the rule-J1 store
+// invalidation check), the control-flow group as block
+// terminators, TRAP as a fault exit, and DSPSET/CSPSET in the
+// design's terminate-after form. Everything outside the compiled
+// groups still ends a block before the instruction and is
+// single-stepped via step().
 // This file contains:
 //   * the engine-indicator types the design names (agent_notes/
 //     v071-jit-design.md §2.3): NovaEnginePreference, NovaActiveEngine,
@@ -183,6 +188,16 @@ struct CompiledBlock {
     /// Guest pc the block's .next exit leaves in state.pc (== the
     /// first instruction NOT executed by the block).
     var endPc: UInt64 = 0
+    /// J3: true when the block ends with a compiled terminator
+    /// (control-flow / DSPSET / CSPSET) whose exit stub already left
+    /// the dispatch pc in state.pc — the trampoline re-dispatches
+    /// there and must NOT single-step (there is no foreign
+    /// instruction pending).
+    var endIsTerminator: Bool = false
+    /// J3: true when the block ends with DSPSET/CSPSET — after it
+    /// executes the trampoline drops the whole cache (rule J2)
+    /// before re-dispatching.
+    var endFlushes: Bool = false
 }
 
 // MARK: - JitState (design §5.1 — fixed layout, all UInt64 slots)
@@ -635,6 +650,29 @@ final class JitEmitter {
     func ldrOff(_ rt: Int, _ rn: Int, _ byteOff: Int) {
         emit(0xF9400000 | (UInt32(byteOff / 8) << 10) | (UInt32(rn) << 5) | UInt32(rt))
     }
+    // J3 width loads/stores at [rn, #0] (unsigned-offset forms with
+    // imm12 = 0; encodings cross-checked against llvm-mc aarch64:
+    // ldrb 0x39400000, ldrh 0x79400000, ldr w 0xB9400000,
+    // strb 0x39000000, strh 0x79000000, str w 0xB9000000).
+    // Loading into a W register zero-extends into X.
+    func ldrbW(_ rt: Int, _ rn: Int) {
+        emit(0x39400000 | (UInt32(rn) << 5) | UInt32(rt))
+    }
+    func ldrhW(_ rt: Int, _ rn: Int) {
+        emit(0x79400000 | (UInt32(rn) << 5) | UInt32(rt))
+    }
+    func ldrW(_ rt: Int, _ rn: Int) {
+        emit(0xB9400000 | (UInt32(rn) << 5) | UInt32(rt))
+    }
+    func strbW(_ rt: Int, _ rn: Int) {
+        emit(0x39000000 | (UInt32(rn) << 5) | UInt32(rt))
+    }
+    func strhW(_ rt: Int, _ rn: Int) {
+        emit(0x79000000 | (UInt32(rn) << 5) | UInt32(rt))
+    }
+    func strW(_ rt: Int, _ rn: Int) {
+        emit(0xB9000000 | (UInt32(rn) << 5) | UInt32(rt))
+    }
     func strOff(_ rt: Int, _ rn: Int, _ byteOff: Int) {
         emit(0xF9000000 | (UInt32(byteOff / 8) << 10) | (UInt32(rn) << 5) | UInt32(rt))
     }
@@ -649,7 +687,7 @@ final class JitEmitter {
     func ret() { emit(0xD65F03C0) }
 }
 
-// MARK: - Block compiler (J2: stack + integer ALU groups only)
+// MARK: - Block compiler (J2: stack + integer ALU; J3: memory + control flow)
 //
 // Register discipline (design §5.1): x19 = JitState*, x20 = delta,
 // x21/x22/x23 = dsp/csp/fp, x24 = limit, x25 = ramBase,
@@ -689,6 +727,10 @@ final class JitBlockCompiler {
     private var faultLabels: [UInt64: Int] = [:]   // trap raw -> label, per instruction
     private var faultPc: UInt64 = 0                // nextPC of the instruction being emitted
     private let foldLabel: Int
+    // J3: set by terminator emission (control flow, DSPSET/CSPSET,
+    // TRAP). compile() stops the block after such an instruction.
+    var terminated = false
+    var terminatorFlushes = false
 
     // AArch64 condition codes used below.
     private let ccEQ: UInt32 = 0, ccNE: UInt32 = 1, ccHS: UInt32 = 2, ccLO: UInt32 = 3
@@ -806,6 +848,72 @@ final class JitBlockCompiler {
         em.strOff(13, 10, 0)
     }
 
+    // ---- J3 helpers ----
+    /// Rule J1 inline interval check after a RAM store: written
+    /// range [x15, x15+size) vs the cache bounding interval
+    /// [codeLo, codeHi) in JitState. On any possible overlap, exit
+    /// via the .invalidated stub (pc = nextPc; the store has
+    /// completed). Same sequence shape as J2's STORL check. The
+    /// store's own bounds check has already bounded x15 to RAM, so
+    /// x15+size cannot wrap.
+    private func emitJ1Check(size: Int, nextPc: UInt64) {
+        let noInv = em.newLabel()
+        em.ldrOff(9, 19, JitOff.codeLo)
+        em.addImm(10, 15, size)
+        em.cmpReg(10, 9)
+        em.bcond(ccLS, noInv)                             // addr+size <= codeLo
+        em.ldrOff(9, 19, JitOff.codeHi)
+        em.cmpReg(15, 9)
+        em.bcond(ccHS, noInv)                             // addr >= codeHi
+        em.b(stubLabel(.invalidated(pc: nextPc)))
+        em.place(noInv)
+    }
+
+    /// MMIO peek-don't-pop bail (design §5.4 / rule J3), for the
+    /// four MMIO-routed opcodes only (LOAD64/LOADU8/STORE8/STORE64).
+    /// Emits the boundary CHECK only, then peeks the address on top
+    /// of the data stack (a load, no pop): if it is readable and
+    /// >= 0xFFFF_FFFF_FFFF_0000, exit .singleStep BEFORE the
+    /// instruction (delta excludes it; pc names it) so the
+    /// trampoline's step() performs it with identical MMIO
+    /// semantics. Any state in which peeking itself would fault
+    /// (underflow / unreadable slot) falls through to the body,
+    /// whose pops fault in step()'s order. On the RAM path the
+    /// boundary is committed and the body runs inline.
+    private func emitMMIOPeekBail(insnPc: UInt64) {
+        boundaryCheckOnly(insnPc: insnPc)
+        let body = em.newLabel()
+        em.cmpReg(21, 27)                                 // dsp >= dataBase?
+        em.bcond(ccHS, body)
+        em.ldrOff(9, 19, JitOff.maxStart64)
+        em.cmpReg(21, 9)
+        em.bcond(ccHI, body)
+        em.addReg(10, 25, 21)
+        em.ldrOff(15, 10, 0)                              // peeked addr
+        em.loadImm64(9, 0xFFFF_FFFF_FFFF_0000)
+        em.cmpReg(15, 9)
+        em.bcond(ccLO, body)                              // RAM address -> body
+        em.b(stubLabel(.singleStep(pc: insnPc)))
+        em.place(body)
+        boundaryCommit()
+    }
+
+    /// Exit the block with reason .next and state.pc = a baked
+    /// target (control-flow terminators).
+    private func emitExitNext(target: UInt64) {
+        em.loadImm64(9, target)
+        em.strOff(9, 19, JitOff.pc)
+        em.movz(0, 0)                                     // reason .next
+        em.b(foldLabel)
+    }
+    /// Exit the block with reason .next and state.pc = the value
+    /// in register `reg` (RET/JMPI/CALLI dynamic targets).
+    private func emitExitNextDynamic(reg: Int) {
+        em.strOff(reg, 19, JitOff.pc)
+        em.movz(0, 0)                                     // reason .next
+        em.b(foldLabel)
+    }
+
     /// CMP/TST flag capture: host NZCV (set by the preceding subs)
     /// is packed into JitState.flags (bit3 N, bit2 Z, bit1 C,
     /// bit0 V — the JitState packing). Only flag-neutral
@@ -892,13 +1000,25 @@ final class JitBlockCompiler {
         case 0x03: return 4
         case 0x04: return 8
         case 0x00, 0x05, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
-             0x10, 0x11, 0x13, 0x15, 0x1B, 0x1C, 0x1D:
+             0x10, 0x11, 0x12, 0x13, 0x15, 0x1B, 0x1C, 0x1D, 0x1E:
             return 0
         case 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48,
              0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x50, 0x51,
              0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x5C, 0x5D, 0x5E,
              0x5F, 0x60:
             return 0
+        // J3 memory group (all zero-operand).
+        case 0x80, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A:
+            return 0
+        // J3 control-flow group.
+        case 0xA0, 0xA2, 0xA3, 0xA6, 0xA7, 0xA8, 0xAD:
+            return 2
+        case 0xA1, 0xA9:
+            return 4
+        case 0xAA, 0xAB, 0xAC:
+            return 0
+        case 0xAE:
+            return 1
         default:
             return nil
         }
@@ -929,18 +1049,21 @@ final class JitBlockCompiler {
         var pc = head
         var count = 0
         var endIsCap = false
+        var endIsTerminator = false
+        var endFlushes = false
         while count < 64 {
             let insnPc = pc
             // Decode-fault / head checks: the interpreter reproduces
             // these states itself, so the block ends BEFORE here.
             if insnPc >= ramSize { break }
             let opcode = buf[Int(insnPc)]
-            // J2 exclusions ending the block BEFORE the instruction:
-            // 0x0F ROLL (design bail), 0x12 DSPSET / 0x1E CSPSET
-            // (stack-pointer moves; single-stepped + J5 flush in J2 —
-            // design's terminating treatment is J3), and everything
-            // outside the two groups.
-            if opcode == 0x0F || opcode == 0x12 || opcode == 0x1E { break }
+            // Exclusions ending the block BEFORE the instruction:
+            // 0x0F ROLL (design bail) and 0x8F MEMCPY (design §6.5
+            // bail — unbounded write range, J1 cannot check it
+            // cheaply inline; the J5 flush after its single-step
+            // makes it safe), plus everything outside the compiled
+            // groups.
+            if opcode == 0x0F || opcode == 0x8F { break }
             guard let oplen = operandLength(opcode) else { break }
             let total = UInt64(1 + oplen)
             if insnPc &+ total > ramSize { break }              // operand would fault at fetch
@@ -951,6 +1074,11 @@ final class JitBlockCompiler {
             emitInstruction(opcode: opcode, insnPc: insnPc, nextPc: nextPc)
             pc = nextPc
             count += 1
+            if terminated {
+                endIsTerminator = true
+                endFlushes = terminatorFlushes
+                break
+            }
             if count == 64 { endIsCap = true }
         }
         if count == 0 { return nil }
@@ -960,6 +1088,8 @@ final class JitBlockCompiler {
         block.byteLength = Int(pc &- head)
         block.instructionCount = count
         block.endIsCap = endIsCap
+        block.endIsTerminator = endIsTerminator
+        block.endFlushes = endFlushes
         block.endPc = pc
 
         // ---- Normal (.next) exit stub, fallen into ----
@@ -1119,6 +1249,14 @@ final class JitBlockCompiler {
             boundary(insnPc: insnPc)
             em.movReg(13, 21)
             emitDPush()
+        case 0x12: // DSPSET — design §6.2 terminate-after form (J3):
+            // execute, exit .next at nextPc, trampoline flushes (J2).
+            boundary(insnPc: insnPc)
+            emitDPop(dest: 13)
+            em.movReg(21, 13)                                 // dsp = popped (only after a successful pop, as step())
+            emitExitNext(target: nextPc)
+            terminated = true
+            terminatorFlushes = true
         case 0x13: // FPGET
             boundary(insnPc: insnPc)
             em.movReg(13, 23)
@@ -1210,6 +1348,13 @@ final class JitBlockCompiler {
             boundary(insnPc: insnPc)
             em.movReg(13, 22)
             emitDPush()
+        case 0x1E: // CSPSET — design §6.2 terminate-after form (J3).
+            boundary(insnPc: insnPc)
+            emitDPop(dest: 13)
+            em.movReg(22, 13)                                 // csp = popped
+            emitExitNext(target: nextPc)
+            terminated = true
+            terminatorFlushes = true
 
         // ---- Integer ALU group ----
         case 0x40: // ADD
@@ -1369,6 +1514,211 @@ final class JitBlockCompiler {
             em.lslv(13, 13, 9)
             em.asrv(13, 13, 9)
             emitDPush()
+
+        // ---- Memory group (J3) ----
+        // step()'s order for every case: pop addr (then value for
+        // stores), one range check covering the whole access
+        // (identical fault iff any byte is out of bounds — the
+        // checked accessors' own comparisons), transfer, push for
+        // loads. A faulting access transfers nothing: the check
+        // precedes every byte move.
+        case 0x80: // LOAD8 (sign-extended byte; never MMIO-routed)
+            boundary(insnPc: insnPc)
+            emitDPop(dest: 15)
+            em.ldrOff(9, 19, JitOff.ramSize)
+            em.cmpReg(15, 9)
+            em.bcond(ccHS, faultLabel(.loadAccessFault))      // addr >= ramSize
+            em.addReg(10, 25, 15)
+            em.ldrbW(13, 10)
+            em.movz(9, 56)                                    // sign-extend low 8
+            em.lslv(13, 13, 9)
+            em.asrv(13, 13, 9)
+            emitDPush()
+        case 0x83: // LOAD64 (MMIO-routed: peek bail first)
+            emitMMIOPeekBail(insnPc: insnPc)
+            emitDPop(dest: 15)
+            emitLoad64()                                      // x15 addr -> x13 value
+            emitDPush()
+        case 0x84: // LOADU8 (MMIO-routed: peek bail first)
+            emitMMIOPeekBail(insnPc: insnPc)
+            emitDPop(dest: 15)
+            em.ldrOff(9, 19, JitOff.ramSize)
+            em.cmpReg(15, 9)
+            em.bcond(ccHS, faultLabel(.loadAccessFault))
+            em.addReg(10, 25, 15)
+            em.ldrbW(13, 10)                                  // zero-extends
+            emitDPush()
+        case 0x85: // LOADU16 (never MMIO-routed)
+            boundary(insnPc: insnPc)
+            emitDPop(dest: 15)
+            em.ldrOff(9, 19, JitOff.maxStart16)
+            em.cmpReg(15, 9)
+            em.bcond(ccHI, faultLabel(.loadAccessFault))      // addr > maxStart16
+            em.addReg(10, 25, 15)
+            em.ldrhW(13, 10)
+            emitDPush()
+        case 0x86: // LOADU32 (never MMIO-routed)
+            boundary(insnPc: insnPc)
+            emitDPop(dest: 15)
+            em.ldrOff(9, 19, JitOff.maxStart32)
+            em.cmpReg(15, 9)
+            em.bcond(ccHI, faultLabel(.loadAccessFault))
+            em.addReg(10, 25, 15)
+            em.ldrW(13, 10)
+            emitDPush()
+        case 0x87: // STORE8 (MMIO-routed: peek bail first; RAM path + J1)
+            emitMMIOPeekBail(insnPc: insnPc)
+            emitDPop(dest: 15)                                // addr
+            emitDPop(dest: 13)                                // value
+            em.ldrOff(9, 19, JitOff.ramSize)
+            em.cmpReg(15, 9)
+            em.bcond(ccHS, faultLabel(.storeAccessFault))     // addr >= ramSize
+            em.addReg(10, 25, 15)
+            em.strbW(13, 10)                                  // low byte only (= v & 0xFF)
+            emitJ1Check(size: 1, nextPc: nextPc)
+        case 0x88: // STORE16 (never MMIO-routed; + J1)
+            boundary(insnPc: insnPc)
+            emitDPop(dest: 15)
+            emitDPop(dest: 13)
+            em.ldrOff(9, 19, JitOff.maxStart16)
+            em.cmpReg(15, 9)
+            em.bcond(ccHI, faultLabel(.storeAccessFault))
+            em.addReg(10, 25, 15)
+            em.strhW(13, 10)                                  // low 16 (= v & 0xFFFF)
+            emitJ1Check(size: 2, nextPc: nextPc)
+        case 0x89: // STORE32 (never MMIO-routed; + J1)
+            boundary(insnPc: insnPc)
+            emitDPop(dest: 15)
+            emitDPop(dest: 13)
+            em.ldrOff(9, 19, JitOff.maxStart32)
+            em.cmpReg(15, 9)
+            em.bcond(ccHI, faultLabel(.storeAccessFault))
+            em.addReg(10, 25, 15)
+            em.strW(13, 10)                                   // low 32
+            emitJ1Check(size: 4, nextPc: nextPc)
+        case 0x8A: // STORE64 (MMIO-routed: peek bail first; RAM path + J1)
+            emitMMIOPeekBail(insnPc: insnPc)
+            emitDPop(dest: 15)                                // addr
+            emitDPop(dest: 13)                                // value
+            emitStore64()                                     // x15 addr, x13 value
+            emitJ1Check(size: 8, nextPc: nextPc)
+
+        // ---- Control-flow group (J3) — all block terminators ----
+        // Targets for direct branches are baked at compile time
+        // with step()'s arithmetic (pc after the operand, plus the
+        // sign-extended offset, wrapping). Fault state for the
+        // stack-touching forms is pc = nextPc via faultPc, exactly
+        // as step() leaves it (operand consumed, cycle counted).
+        case 0xA0: // JMP off16
+            boundary(insnPc: insnPc)
+            let target = UInt64(bitPattern: Int64(bitPattern: nextPc) &+ Int64(Int16(bitPattern: imm16())))
+            emitExitNext(target: target)
+            terminated = true
+        case 0xA1: // JMP32 off32
+            boundary(insnPc: insnPc)
+            let target = UInt64(bitPattern: Int64(bitPattern: nextPc) &+ Int64(Int32(bitPattern: imm32())))
+            emitExitNext(target: target)
+            terminated = true
+        case 0xA2: // BZ off16 — pop; branch iff popped == 0
+            boundary(insnPc: insnPc)
+            let target = UInt64(bitPattern: Int64(bitPattern: nextPc) &+ Int64(Int16(bitPattern: imm16())))
+            emitDPop(dest: 13)
+            em.cmpImm(13, 0)
+            let taken = em.newLabel()
+            em.bcond(ccEQ, taken)
+            emitExitNext(target: nextPc)
+            em.place(taken)
+            emitExitNext(target: target)
+            terminated = true
+        case 0xA3: // BNZ off16 — pop; branch iff popped != 0
+            boundary(insnPc: insnPc)
+            let target = UInt64(bitPattern: Int64(bitPattern: nextPc) &+ Int64(Int16(bitPattern: imm16())))
+            emitDPop(dest: 13)
+            em.cmpImm(13, 0)
+            let taken = em.newLabel()
+            em.bcond(ccNE, taken)
+            emitExitNext(target: nextPc)
+            em.place(taken)
+            emitExitNext(target: target)
+            terminated = true
+        case 0xA6: // BEQ off16 — branch iff guest Z flag set
+            boundary(insnPc: insnPc)
+            let target = UInt64(bitPattern: Int64(bitPattern: nextPc) &+ Int64(Int16(bitPattern: imm16())))
+            em.ldrOff(15, 19, JitOff.flags)
+            em.movz(9, 4)                                     // Z = bit 2 of the packing
+            em.andReg(15, 15, 9)
+            em.cmpImm(15, 0)
+            let taken = em.newLabel()
+            em.bcond(ccNE, taken)
+            emitExitNext(target: nextPc)
+            em.place(taken)
+            emitExitNext(target: target)
+            terminated = true
+        case 0xA7: // BNE off16 — branch iff guest Z flag clear
+            boundary(insnPc: insnPc)
+            let target = UInt64(bitPattern: Int64(bitPattern: nextPc) &+ Int64(Int16(bitPattern: imm16())))
+            em.ldrOff(15, 19, JitOff.flags)
+            em.movz(9, 4)
+            em.andReg(15, 15, 9)
+            em.cmpImm(15, 0)
+            let taken = em.newLabel()
+            em.bcond(ccEQ, taken)
+            emitExitNext(target: nextPc)
+            em.place(taken)
+            emitExitNext(target: target)
+            terminated = true
+        case 0xA8: // CALL off16 — cpush(return pc), then branch
+            boundary(insnPc: insnPc)
+            let target = UInt64(bitPattern: Int64(bitPattern: nextPc) &+ Int64(Int16(bitPattern: imm16())))
+            em.loadImm64(13, nextPc)
+            emitCPush()
+            emitExitNext(target: target)
+            terminated = true
+        case 0xA9: // CALL32 off32
+            boundary(insnPc: insnPc)
+            let target = UInt64(bitPattern: Int64(bitPattern: nextPc) &+ Int64(Int32(bitPattern: imm32())))
+            em.loadImm64(13, nextPc)
+            emitCPush()
+            emitExitNext(target: target)
+            terminated = true
+        case 0xAA: // CALLI — pop target, cpush(return pc), jump
+            boundary(insnPc: insnPc)
+            emitDPop(dest: 14)                                // target (survives cpush: x9–x11/x13 only)
+            em.loadImm64(13, nextPc)
+            emitCPush()
+            emitExitNextDynamic(reg: 14)
+            terminated = true
+        case 0xAB: // RET — pc = cpop()
+            boundary(insnPc: insnPc)
+            emitCPop(dest: 13)
+            emitExitNextDynamic(reg: 13)
+            terminated = true
+        case 0xAC: // JMPI — pc = dpop()
+            boundary(insnPc: insnPc)
+            emitDPop(dest: 13)
+            emitExitNextDynamic(reg: 13)
+            terminated = true
+        case 0xAD: // LOOP off16 — n = dpop()-1; dpush(n); branch iff n != 0
+            boundary(insnPc: insnPc)
+            let target = UInt64(bitPattern: Int64(bitPattern: nextPc) &+ Int64(Int16(bitPattern: imm16())))
+            emitDPop(dest: 13)
+            em.subImm(13, 13, 1)
+            emitDPush()                                       // pushes x13 (= n)
+            em.cmpImm(13, 0)
+            let taken = em.newLabel()
+            em.bcond(ccNE, taken)
+            emitExitNext(target: nextPc)
+            em.place(taken)
+            emitExitNext(target: target)
+            terminated = true
+        case 0xAE: // TRAP code — tval = baked operand, fault exit
+            // (design §6.3: compiled as an exit; the trampoline
+            // hands the trap to handleTrapAfterStep unchanged).
+            boundary(insnPc: insnPc)
+            em.movz(9, UInt32(imm8()))
+            em.strOff(9, 19, JitOff.tval)
+            em.b(faultLabel(.breakpoint))
+            terminated = true
         default:
             // Unreachable: compile() only calls for grouped opcodes.
             boundary(insnPc: insnPc)
@@ -1728,8 +2078,17 @@ final class NovaJIT {
 
             switch d.reason {
             case .next:
-                if blk.endIsCap {
-                    // Re-dispatch at endPc as a fresh head.
+                if blk.endFlushes {
+                    // DSPSET/CSPSET terminated this block (rule
+                    // J2): drop the whole cache before dispatching
+                    // anywhere else.
+                    flushCache(countStat: true)
+                }
+                if blk.endIsCap || blk.endIsTerminator {
+                    // Re-dispatch at state.pc as a fresh head: the
+                    // cap fallthrough pc, or the terminator's
+                    // resolved target / fallthrough pc, which its
+                    // exit stub already wrote to state.pc.
                     continue
                 }
                 // Block ended BEFORE a foreign instruction:
