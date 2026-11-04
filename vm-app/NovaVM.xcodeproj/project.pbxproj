@@ -343,7 +343,7 @@ A30000000000000000000001 /* NovaVM.app */ = {isa = PBXFileReference; explicitFil
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.0.71;
+				MARKETING_VERSION = 0.0.72;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -380,7 +380,7 @@ A30000000000000000000001 /* NovaVM.app */ = {isa = PBXFileReference; explicitFil
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.0.71;
+				MARKETING_VERSION = 0.0.72;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nova.vm;
