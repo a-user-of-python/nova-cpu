@@ -58,18 +58,36 @@ import Darwin
 @_silgen_name("sys_icache_invalidate")
 private func novaJitSysICacheInvalidate(_ start: UnsafeMutableRawPointer, _ len: Int)
 
-/// `pthread_jit_write_protect_np` is marked unavailable in the iOS
-/// SDK headers (it is declared for macOS only), so an iOS build
-/// cannot call the imported declaration — the v0.0.71 app build
-/// failed on exactly that. The symbol itself exists in libsystem
-/// on both platforms and is what MAP_JIT write/execute toggling
-/// requires at runtime, so bind it directly under a local name —
-/// the same pattern as sys_icache_invalidate above. Behaviour is
-/// identical: same underlying function, same arguments. (Lane J5
-/// build fix, applied to BOTH copies so the harness variant and
-/// the shipped file stay byte-identical.)
+/// `pthread_jit_write_protect_np` cannot be called through the
+/// imported declaration in an iOS build: the iOS SDK headers mark
+/// it unavailable (it is declared for macOS only), and the iOS
+/// link stubs omit the symbol entirely — the v0.0.71 app build
+/// failed on the declaration first, then at link. The function
+/// does exist in the iOS runtime libsystem (it is how sideloaded
+/// JITs toggle MAP_JIT), so on iOS it is resolved once with
+/// dlsym; if it were ever absent the toggle is a no-op and the
+/// probe's smoke test fails that allocation path honestly,
+/// exactly as an allocation failure would. On macOS the symbol
+/// is bound directly, exactly as the gated harness code has
+/// always called it. Either way the same underlying function
+/// receives the same arguments. (Lane J5 build fix, applied to
+/// BOTH copies so the harness variant and the shipped file stay
+/// byte-identical.)
+#if os(iOS)
+private typealias NovaJitWriteProtectFn = @convention(c) (Int32) -> Void
+private let novaJitWriteProtectFn: NovaJitWriteProtectFn? = {
+    // RTLD_DEFAULT is ((void *)-2) in Darwin's dlfcn.h.
+    guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2),
+                          "pthread_jit_write_protect_np") else { return nil }
+    return unsafeBitCast(sym, to: NovaJitWriteProtectFn.self)
+}()
+private func novaJitWriteProtectNp(_ enabled: Int32) {
+    novaJitWriteProtectFn?(enabled)
+}
+#else
 @_silgen_name("pthread_jit_write_protect_np")
 private func novaJitWriteProtectNp(_ enabled: Int32)
+#endif
 
 /// The probe's smoke-test function shape: `mov w0, #42; ret`.
 private typealias JitFnConst = @convention(c) () -> Int32
