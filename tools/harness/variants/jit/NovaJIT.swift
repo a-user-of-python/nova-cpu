@@ -212,6 +212,14 @@ enum JitExitReason: UInt64 {
 
 // MARK: - Compiled block record (design §3)
 
+/// One chainable exit site of a compiled block (v0.0.72 design §4.5).
+struct JitChainSite {
+    var siteId: Int = 0
+    /// Baked target for static sites; unused (0) for dynamic sites.
+    var target: UInt64 = 0
+    var isDynamic: Bool = false
+}
+
 /// Cache entry metadata. The cache itself is per-run (rule J6) and
 /// lives in the trampoline from J2 on; J1 defines the record shape.
 struct CompiledBlock {
@@ -239,6 +247,12 @@ struct CompiledBlock {
     /// executes the trampoline drops the whole cache (rule J2)
     /// before re-dispatching.
     var endFlushes: Bool = false
+    /// v0.0.72: byte offset (from poolOffset) of the chained entry
+    /// point — immediately after the prologue (design §4.2).
+    var chainedEntryOffset: Int = 0
+    /// v0.0.72: chainable exit sites created by this block's
+    /// compilation (design §4.5).
+    var chainSites: [JitChainSite] = []
 }
 
 // MARK: - JitState (design §5.1 — fixed layout, all UInt64 slots)
@@ -325,6 +339,18 @@ struct JitState {
     var helperRdrand: UInt64 = 0    // 360
     var helperConsole: UInt64 = 0   // 368
     var memPtr: UInt64 = 0          // 376
+    // v0.0.72 appended slots (offsets 384…448, chain design §2).
+    // Trampoline/JIT-internal, exactly like jitLimit/limitReason:
+    // syncIn/syncOut do NOT touch them.
+    var maxSteps: UInt64 = 0        // 384
+    var chainStepsUsed: UInt64 = 0  // 392
+    var chainTimerCount: UInt64 = 0 // 400
+    var timerInterval: UInt64 = 0   // 408
+    var linkTable: UInt64 = 0       // 416
+    var generation: UInt64 = 0      // 424
+    var runDelta: UInt64 = 0        // 432
+    var chainCount: UInt64 = 0      // 440
+    var exitEndFlags: UInt64 = 0    // 448
 
     static let flagN: UInt64 = 1 << 3
     static let flagZ: UInt64 = 1 << 2
@@ -545,6 +571,15 @@ enum JitOff {
     static let helperRdrand = 360
     static let helperConsole = 368
     static let memPtr = 376
+    static let maxSteps = 384
+    static let chainStepsUsed = 392
+    static let chainTimerCount = 400
+    static let timerInterval = 408
+    static let linkTable = 416
+    static let generation = 424
+    static let runDelta = 432
+    static let chainCount = 440
+    static let exitEndFlags = 448
 
     static func verifyLayout() -> Bool {
         func off(_ kp: PartialKeyPath<JitState>) -> Int {
@@ -586,6 +621,15 @@ enum JitOff {
             && off(\JitState.helperRdrand) == helperRdrand
             && off(\JitState.helperConsole) == helperConsole
             && off(\JitState.memPtr) == memPtr
+            && off(\JitState.maxSteps) == maxSteps
+            && off(\JitState.chainStepsUsed) == chainStepsUsed
+            && off(\JitState.chainTimerCount) == chainTimerCount
+            && off(\JitState.timerInterval) == timerInterval
+            && off(\JitState.linkTable) == linkTable
+            && off(\JitState.generation) == generation
+            && off(\JitState.runDelta) == runDelta
+            && off(\JitState.chainCount) == chainCount
+            && off(\JitState.exitEndFlags) == exitEndFlags
     }
 }
 
@@ -750,6 +794,9 @@ final class JitEmitter {
     func blr(_ rn: Int) {
         emit(0xD63F0000 | (UInt32(rn) << 5))
     }
+    // v0.0.72: BR Xn = 0xD61F0000 | Rn<<5 (chain design §4.1).
+    // Used only by the chain stub's final jump to a successor.
+    func br(_ rn: Int) { emit(0xD61F0000 | (UInt32(rn) << 5)) }
 }
 
 // MARK: - Block compiler (J2: stack + integer ALU; J3: memory + control flow)
@@ -775,6 +822,7 @@ private enum JitStubKind {
     case limit(pc: UInt64)
     case singleStep(pc: UInt64)
     case invalidated(pc: UInt64)
+    case chain(siteId: Int)
 }
 
 final class JitBlockCompiler {
@@ -800,6 +848,13 @@ final class JitBlockCompiler {
     // console address takes the direct mmioWrite callout instead of
     // the J3 peek-exit. Set from NovaCPU.jitD3Enabled per run.
     let d3Enabled: Bool
+    // v0.0.72: chain-site id allocation (chain design §3/§4.5).
+    // Ids are per-run, handed in by the trampoline; nextSiteId is
+    // read back after every compile attempt (success or failure)
+    // so a failed compile's ids are never reused.
+    let firstSiteId: Int
+    var nextSiteId: Int
+    var chainSites: [JitChainSite] = []
 
     // AArch64 condition codes used below.
     private let ccEQ: UInt32 = 0, ccNE: UInt32 = 1, ccHS: UInt32 = 2, ccLO: UInt32 = 3
@@ -808,8 +863,11 @@ final class JitBlockCompiler {
 
     init(buf: UnsafeMutablePointer<UInt8>, ramSize: UInt64,
          dslim: UInt64, dataBase: UInt64, cslim: UInt64, callBase: UInt64,
-         vslim: UInt64, vectorBase: UInt64, d3Enabled: Bool = true) {
+         vslim: UInt64, vectorBase: UInt64, d3Enabled: Bool = true,
+         firstSiteId: Int = 0) {
         self.d3Enabled = d3Enabled
+        self.firstSiteId = firstSiteId
+        self.nextSiteId = firstSiteId
         self.buf = buf
         self.ramSize = ramSize
         self.dslim = dslim
@@ -969,17 +1027,156 @@ final class JitBlockCompiler {
     }
 
     /// Exit the block with reason .next and state.pc = a baked
-    /// target (control-flow terminators).
-    private func emitExitNext(target: UInt64) {
+    /// target (control-flow terminators). With chain = true
+    /// (v0.0.72 design §4.3) the exit instead registers a chain
+    /// site and branches to its chain stub with the target in x9;
+    /// with chain = false this emits exactly the v0.0.71 sequence.
+    private func emitExitNext(target: UInt64, chain: Bool = false) {
+        if chain {
+            let siteId = nextSiteId
+            nextSiteId += 1
+            chainSites.append(JitChainSite(siteId: siteId,
+                                           target: target,
+                                           isDynamic: false))
+            em.loadImm64(9, target)
+            em.b(stubLabel(.chain(siteId: siteId)))
+            return
+        }
         em.loadImm64(9, target)
         em.strOff(9, 19, JitOff.pc)
         em.movz(0, 0)                                     // reason .next
         em.b(foldLabel)
     }
     /// Exit the block with reason .next and state.pc = the value
-    /// in register `reg` (RET/JMPI/CALLI dynamic targets).
-    private func emitExitNextDynamic(reg: Int) {
+    /// in register `reg` (RET/JMPI/CALLI dynamic targets). With
+    /// chain = true (v0.0.72 design §4.3) the exit instead
+    /// registers a dynamic chain site and branches to its chain
+    /// stub with the target copied into x9; with chain = false
+    /// this emits exactly the v0.0.71 sequence.
+    private func emitExitNextDynamic(reg: Int, chain: Bool = false) {
+        if chain {
+            let siteId = nextSiteId
+            nextSiteId += 1
+            chainSites.append(JitChainSite(siteId: siteId,
+                                           target: 0,
+                                           isDynamic: true))
+            em.movReg(9, reg)
+            em.b(stubLabel(.chain(siteId: siteId)))
+            return
+        }
         em.strOff(reg, 19, JitOff.pc)
+        em.movz(0, 0)                                     // reason .next
+        em.b(foldLabel)
+    }
+
+    /// The chain stub (v0.0.72 design §4.4). Entry contract:
+    /// x9 = target guest pc, x20 = the finished block's delta,
+    /// x19–x28 as at any block exit. Scratch: x10–x15 only
+    /// (x10 keeps the slot pointer, x11 the slot entry, from the
+    /// lookup through the final br). On any miss the stub performs
+    /// the ordinary .next exit via the fold; on a hit it settles
+    /// the finished block's accounts, computes the successor's
+    /// §5.3 limit exactly as the trampoline would, and brs to the
+    /// successor's chained entry.
+    private func emitChainStub(siteId: Int) {
+        let miss = em.newLabel()
+        let haveTimer = em.newLabel()
+        let reasonBudget = em.newLabel()
+        let reasonDone = em.newLabel()
+        let skipBudget = em.newLabel()
+        let skipTimer = em.newLabel()
+        // 1. Cap check: chainCount >= 128 -> miss.
+        em.ldrOff(10, 19, JitOff.chainCount)
+        em.cmpImm(10, 128)
+        em.bcond(ccHS, miss)
+        // 2. Slot lookup: slot = linkTable + siteId*48 (baked).
+        em.ldrOff(10, 19, JitOff.linkTable)
+        em.loadImm64(11, UInt64(siteId * 48))
+        em.addReg(10, 10, 11)                             // x10 = slot
+        em.ldrOff(11, 10, 24)                             // slot.generation
+        em.ldrOff(12, 19, JitOff.generation)
+        em.cmpReg(11, 12)
+        em.bcond(ccNE, miss)
+        em.ldrOff(11, 10, 8)                              // slot.target
+        em.cmpReg(11, 9)
+        em.bcond(ccNE, miss)
+        em.ldrOff(11, 10, 0)                              // x11 = slot.entry
+        em.cmpImm(11, 0)
+        em.bcond(ccEQ, miss)
+        // 3. Settle accounts (hit path only), then x20 = 0.
+        em.ldrOff(12, 19, JitOff.cycle)
+        em.addReg(12, 12, 20)
+        em.strOff(12, 19, JitOff.cycle)
+        em.ldrOff(12, 19, JitOff.runDelta)
+        em.addReg(12, 12, 20)
+        em.strOff(12, 19, JitOff.runDelta)
+        em.ldrOff(12, 19, JitOff.chainStepsUsed)
+        em.addReg(12, 12, 20)
+        em.strOff(12, 19, JitOff.chainStepsUsed)
+        em.ldrOff(12, 19, JitOff.chainTimerCount)
+        em.subReg(12, 12, 20)
+        em.strOff(12, 19, JitOff.chainTimerCount)
+        em.movReg(20, 31)                                 // delta = 0
+        // 4. chainCount += 1; entryStatus coherence; end flags.
+        em.ldrOff(12, 19, JitOff.chainCount)
+        em.addImm(12, 12, 1)
+        em.strOff(12, 19, JitOff.chainCount)
+        em.ldrOff(12, 19, JitOff.status)
+        em.strOff(12, 19, JitOff.entryStatus)
+        // NOTE: exitEndFlags is stored later, just before the br
+        // (coordinator review) — the defensive timer corner in
+        // step 5 exits via the fold, and on that path the flags
+        // must still describe THIS block, not the successor's.
+        // 5. Successor limit (§5.3 formula, settled values).
+        em.ldrOff(12, 19, JitOff.maxSteps)
+        em.ldrOff(13, 19, JitOff.chainStepsUsed)
+        em.subReg(12, 12, 13)                             // x12 = budgetAllow
+        em.loadImm64(13, UInt64.max)                      // x13 = timerAllow
+        em.ldrOff(14, 19, JitOff.timerInterval)
+        em.cmpImm(14, 0)
+        em.bcond(ccEQ, haveTimer)                         // disarmed
+        em.ldrOff(14, 19, JitOff.status)
+        em.movz(15, 1)
+        em.andReg(14, 14, 15)
+        em.cmpImm(14, 0)
+        em.bcond(ccEQ, haveTimer)                         // armed bit clear
+        em.ldrOff(15, 19, JitOff.chainTimerCount)
+        em.cmpImm(15, 0)
+        // Defensive corner: armed with countdown already 0 exits
+        // via the ordinary .next path — accounts are settled and
+        // x20 = 0 above, so the fold presents lastDelta = runDelta
+        // and the trampoline emulates the firing exactly.
+        em.bcond(ccEQ, miss)
+        em.subImm(13, 15, 1)                              // timerAllow
+        em.place(haveTimer)
+        em.cmpReg(12, 13)
+        em.bcond(ccLS, reasonBudget)                      // budget <= timer
+        em.movz(14, 5)                                    // .timerLimit
+        em.b(reasonDone)
+        em.place(reasonBudget)
+        em.movz(14, 6)                                    // .budgetLimit
+        em.place(reasonDone)
+        em.strOff(14, 19, JitOff.limitReason)
+        em.ldrOff(14, 10, 16)                             // slot.insnCount
+        em.movReg(24, 14)                                 // x24 = min(...)
+        em.cmpReg(12, 24)
+        em.bcond(ccHS, skipBudget)
+        em.movReg(24, 12)
+        em.place(skipBudget)
+        em.cmpReg(13, 24)
+        em.bcond(ccHS, skipTimer)
+        em.movReg(24, 13)
+        em.place(skipTimer)
+        em.strOff(24, 19, JitOff.jitLimit)
+        // The successor's end-mode flags become the live ones
+        // (design §5) — stored only here, on the true hit path.
+        em.ldrOff(12, 10, 32)                             // slot.endFlags
+        em.strOff(12, 19, JitOff.exitEndFlags)
+        // 6. Jump to the successor's chained entry.
+        em.br(11)
+        // 7. Miss / corner: ordinary .next exit via the fold.
+        em.place(miss)
+        em.strOff(9, 19, JitOff.pc)
         em.movz(0, 0)                                     // reason .next
         em.b(foldLabel)
     }
@@ -1256,6 +1453,10 @@ final class JitBlockCompiler {
         em.ldrOff(27, 19, JitOff.dataStackBase)
         em.ldrOff(28, 19, JitOff.cslim)
         em.movReg(20, 31)                                     // delta = 0
+        // v0.0.72 chained entry (design §4.2): a chain stub lands
+        // here — prologue loads already done by the first block,
+        // x24 set by the stub, x20 zeroed by the stub.
+        let chainedEntryWordIndex = em.words.count
 
         var pc = head
         var count = 0
@@ -1302,12 +1503,23 @@ final class JitBlockCompiler {
         block.endIsTerminator = endIsTerminator
         block.endFlushes = endFlushes
         block.endPc = pc
+        block.chainedEntryOffset = chainedEntryWordIndex * 4
+        block.chainSites = chainSites
 
         // ---- Normal (.next) exit stub, fallen into ----
-        em.loadImm64(9, pc)
-        em.strOff(9, 19, JitOff.pc)
-        em.movz(0, 0)                                         // reason .next
-        em.b(foldLabel)
+        // The 64-instruction cap fallthrough is chainable
+        // (v0.0.72 design §4.3, target = the block's endPc); the
+        // non-cap fallthrough (a foreign instruction is pending)
+        // keeps the plain v0.0.71 exit.
+        if endIsCap {
+            emitExitNext(target: pc, chain: true)
+            block.chainSites = chainSites
+        } else {
+            em.loadImm64(9, pc)
+            em.strOff(9, 19, JitOff.pc)
+            em.movz(0, 0)                                     // reason .next
+            em.b(foldLabel)
+        }
 
         // ---- Per-site exit stubs ----
         for stub in stubs {
@@ -1335,6 +1547,8 @@ final class JitBlockCompiler {
                 em.strOff(9, 19, JitOff.pc)
                 em.movz(0, 4)                                 // reason .invalidated
                 em.b(foldLabel)
+            case .chain(let siteId):
+                emitChainStub(siteId: siteId)
             }
         }
 
@@ -1346,7 +1560,12 @@ final class JitBlockCompiler {
         em.strOff(21, 19, JitOff.dsp)
         em.strOff(22, 19, JitOff.csp)
         em.strOff(23, 19, JitOff.fp)
-        em.strOff(20, 19, JitOff.lastDelta)
+        // v0.0.72 (design §2): lastDelta = runDelta + x20 — the
+        // whole segment's count (runDelta is trampoline-seeded 0
+        // per dispatch, so an unchained segment is unchanged).
+        em.ldrOff(9, 19, JitOff.runDelta)
+        em.addReg(9, 9, 20)
+        em.strOff(9, 19, JitOff.lastDelta)
         em.ldrOff(9, 19, JitOff.pc)
         em.strOff(9, 19, JitOff.nextPc)
         em.ldpPost(27, 28, off: 16)
@@ -1813,12 +2032,12 @@ final class JitBlockCompiler {
         case 0xA0: // JMP off16
             boundary(insnPc: insnPc)
             let target = UInt64(bitPattern: Int64(bitPattern: nextPc) &+ Int64(Int16(bitPattern: imm16())))
-            emitExitNext(target: target)
+            emitExitNext(target: target, chain: true)
             terminated = true
         case 0xA1: // JMP32 off32
             boundary(insnPc: insnPc)
             let target = UInt64(bitPattern: Int64(bitPattern: nextPc) &+ Int64(Int32(bitPattern: imm32())))
-            emitExitNext(target: target)
+            emitExitNext(target: target, chain: true)
             terminated = true
         case 0xA2: // BZ off16 — pop; branch iff popped == 0
             boundary(insnPc: insnPc)
@@ -1827,9 +2046,9 @@ final class JitBlockCompiler {
             em.cmpImm(13, 0)
             let taken = em.newLabel()
             em.bcond(ccEQ, taken)
-            emitExitNext(target: nextPc)
+            emitExitNext(target: nextPc, chain: true)
             em.place(taken)
-            emitExitNext(target: target)
+            emitExitNext(target: target, chain: true)
             terminated = true
         case 0xA3: // BNZ off16 — pop; branch iff popped != 0
             boundary(insnPc: insnPc)
@@ -1838,9 +2057,9 @@ final class JitBlockCompiler {
             em.cmpImm(13, 0)
             let taken = em.newLabel()
             em.bcond(ccNE, taken)
-            emitExitNext(target: nextPc)
+            emitExitNext(target: nextPc, chain: true)
             em.place(taken)
-            emitExitNext(target: target)
+            emitExitNext(target: target, chain: true)
             terminated = true
         case 0xA6: // BEQ off16 — branch iff guest Z flag set
             boundary(insnPc: insnPc)
@@ -1851,9 +2070,9 @@ final class JitBlockCompiler {
             em.cmpImm(15, 0)
             let taken = em.newLabel()
             em.bcond(ccNE, taken)
-            emitExitNext(target: nextPc)
+            emitExitNext(target: nextPc, chain: true)
             em.place(taken)
-            emitExitNext(target: target)
+            emitExitNext(target: target, chain: true)
             terminated = true
         case 0xA7: // BNE off16 — branch iff guest Z flag clear
             boundary(insnPc: insnPc)
@@ -1864,40 +2083,40 @@ final class JitBlockCompiler {
             em.cmpImm(15, 0)
             let taken = em.newLabel()
             em.bcond(ccEQ, taken)
-            emitExitNext(target: nextPc)
+            emitExitNext(target: nextPc, chain: true)
             em.place(taken)
-            emitExitNext(target: target)
+            emitExitNext(target: target, chain: true)
             terminated = true
         case 0xA8: // CALL off16 — cpush(return pc), then branch
             boundary(insnPc: insnPc)
             let target = UInt64(bitPattern: Int64(bitPattern: nextPc) &+ Int64(Int16(bitPattern: imm16())))
             em.loadImm64(13, nextPc)
             emitCPush()
-            emitExitNext(target: target)
+            emitExitNext(target: target, chain: true)
             terminated = true
         case 0xA9: // CALL32 off32
             boundary(insnPc: insnPc)
             let target = UInt64(bitPattern: Int64(bitPattern: nextPc) &+ Int64(Int32(bitPattern: imm32())))
             em.loadImm64(13, nextPc)
             emitCPush()
-            emitExitNext(target: target)
+            emitExitNext(target: target, chain: true)
             terminated = true
         case 0xAA: // CALLI — pop target, cpush(return pc), jump
             boundary(insnPc: insnPc)
             emitDPop(dest: 14)                                // target (survives cpush: x9–x11/x13 only)
             em.loadImm64(13, nextPc)
             emitCPush()
-            emitExitNextDynamic(reg: 14)
+            emitExitNextDynamic(reg: 14, chain: true)
             terminated = true
         case 0xAB: // RET — pc = cpop()
             boundary(insnPc: insnPc)
             emitCPop(dest: 13)
-            emitExitNextDynamic(reg: 13)
+            emitExitNextDynamic(reg: 13, chain: true)
             terminated = true
         case 0xAC: // JMPI — pc = dpop()
             boundary(insnPc: insnPc)
             emitDPop(dest: 13)
-            emitExitNextDynamic(reg: 13)
+            emitExitNextDynamic(reg: 13, chain: true)
             terminated = true
         case 0xAD: // LOOP off16 — n = dpop()-1; dpush(n); branch iff n != 0
             boundary(insnPc: insnPc)
@@ -1908,9 +2127,9 @@ final class JitBlockCompiler {
             em.cmpImm(13, 0)
             let taken = em.newLabel()
             em.bcond(ccNE, taken)
-            emitExitNext(target: nextPc)
+            emitExitNext(target: nextPc, chain: true)
             em.place(taken)
-            emitExitNext(target: target)
+            emitExitNext(target: target, chain: true)
             terminated = true
         case 0xAE: // TRAP code — tval = baked operand, fault exit
             // (design §6.3: compiled as an exit; the trampoline
@@ -2224,6 +2443,22 @@ final class NovaJIT {
             return false
         }
 
+        // v0.0.72 link table (chain design §3): raw heap buffer of
+        // 48-byte slots (6 x UInt64), indexed by siteId. Starts at
+        // 8192 slots and doubles on growth (checked before each
+        // compile, margin 16). Growth only happens at dispatch
+        // time, never mid-segment.
+        var linkTableCapacity = 8192
+        var linkTablePtr = UnsafeMutablePointer<UInt64>.allocate(
+            capacity: linkTableCapacity * 6)
+        linkTablePtr.initialize(repeating: 0, count: linkTableCapacity * 6)
+        defer {
+            linkTablePtr.deinitialize(count: linkTableCapacity * 6)
+            linkTablePtr.deallocate()
+        }
+        var nextSiteId = 0
+        var linkGeneration: UInt64 = 1      // 0 means "empty slot"
+
         var stats = JitStats()
         // JitState lives behind a stable heap pointer for the whole
         // run: generated code receives exactly this address, and the
@@ -2264,6 +2499,11 @@ final class NovaJIT {
         cpu.running = true
 
         func flushCache(countStat: Bool) {
+            // v0.0.72: the generation bump is the ONLY link-table
+            // invalidation — every event that can stale a compiled
+            // block funnels through here (design §5).
+            linkGeneration &+= 1
+            if linkGeneration == 0 { linkGeneration = 1 }
             if !cache.isEmpty {
                 cache.removeAll()
                 codeLo = 0
@@ -2275,6 +2515,64 @@ final class NovaJIT {
             // have happened), so heads that failed compilation get
             // retried against fresh bytes.
             failedHeads.removeAll()
+        }
+
+        // v0.0.72: end-mode flags packing (design §2): bit0
+        // endFlushes, bit1 endIsCap, bit2 endIsTerminator.
+        func endFlags(of blk: CompiledBlock) -> UInt64 {
+            var f: UInt64 = 0
+            if blk.endFlushes { f |= 1 }
+            if blk.endIsCap { f |= 2 }
+            if blk.endIsTerminator { f |= 4 }
+            return f
+        }
+
+        // v0.0.72: pass-through linking (design §5). Static sites
+        // use their baked target; a dynamic site uses observedPc
+        // only when the segment's reason was .next. A site whose
+        // target is not cached is left empty (the next traversal
+        // pays the trampoline once and links then).
+        func fillLinks(for source: CompiledBlock,
+                       observedPc: UInt64?, reason: JitExitReason?) {
+            for site in source.chainSites {
+                let targetPc: UInt64
+                if site.isDynamic {
+                    guard let obs = observedPc, reason == .next
+                        else { continue }
+                    targetPc = obs
+                } else {
+                    targetPc = site.target
+                }
+                guard let tgt = cache[targetPc] else { continue }
+                guard site.siteId >= 0 && site.siteId < linkTableCapacity
+                    else { continue }
+                let base = site.siteId * 6
+                linkTablePtr[base + 0] = UInt64(UInt(bitPattern: pool.base))
+                    + UInt64(tgt.poolOffset)
+                    + UInt64(tgt.chainedEntryOffset)
+                linkTablePtr[base + 1] = targetPc
+                linkTablePtr[base + 2] = UInt64(tgt.instructionCount)
+                linkTablePtr[base + 3] = linkGeneration
+                linkTablePtr[base + 4] = endFlags(of: tgt)
+                linkTablePtr[base + 5] = 0
+            }
+        }
+
+        // v0.0.72: double the link table, preserving filled slots
+        // (their generation is unchanged by growth, so links that
+        // were valid stay valid). Dispatch-time only.
+        func growLinkTable() {
+            let newCapacity = linkTableCapacity * 2
+            let newPtr = UnsafeMutablePointer<UInt64>.allocate(
+                capacity: newCapacity * 6)
+            newPtr.initialize(repeating: 0, count: newCapacity * 6)
+            for i in 0..<(linkTableCapacity * 6) {
+                newPtr[i] = linkTablePtr[i]
+            }
+            linkTablePtr.deinitialize(count: linkTableCapacity * 6)
+            linkTablePtr.deallocate()
+            linkTablePtr = newPtr
+            linkTableCapacity = newCapacity
         }
 
         // One interpreter step on the JIT's behalf (foreign/bail
@@ -2315,6 +2613,27 @@ final class NovaJIT {
             let interval = cpu.memory.timerInterval
             let armed = interval > 0 && (statePtr.pointee.status & 1) != 0
 
+            // v0.0.72 per-dispatch seeding (design §5): the chain
+            // slots are trampoline-seeded every dispatch, alongside
+            // the jitLimit/limitReason seeding inside the closure
+            // (exitEndFlags is seeded there, where blk is known).
+            statePtr.pointee.maxSteps = maxSteps
+            statePtr.pointee.chainStepsUsed = stepsUsed
+            statePtr.pointee.chainTimerCount = cpu.memory.timerCount
+            statePtr.pointee.timerInterval = interval
+            statePtr.pointee.linkTable = UInt64(UInt(bitPattern: linkTablePtr))
+            statePtr.pointee.generation = linkGeneration
+            statePtr.pointee.runDelta = 0
+            statePtr.pointee.chainCount = 0
+            // Grow the link table before a compile could overflow
+            // it (design §3: margin 16, checked before each
+            // compile; a dispatch compiles at most one block).
+            if nextSiteId + 16 > linkTableCapacity {
+                growLinkTable()
+                statePtr.pointee.linkTable =
+                    UInt64(UInt(bitPattern: linkTablePtr))
+            }
+
             // Defensive timer corner (design §5.3): an armed timer
             // whose countdown is already 0 cannot enter a block
             // (timerAllow would underflow). Emulate the firing
@@ -2352,7 +2671,12 @@ final class NovaJIT {
                         dslim: limDslim, dataBase: limDataBase,
                         cslim: limCslim, callBase: limCallBase,
                         vslim: limVslim, vectorBase: limVectorBase,
-                        d3Enabled: cpu.jitD3Enabled)
+                        d3Enabled: cpu.jitD3Enabled,
+                        firstSiteId: nextSiteId)
+                    // Advance the run's site counter after EVERY
+                    // compile attempt, success or failure (ids are
+                    // never reused within a run — design §3). Read
+                    // back below, once the attempt's outcome is set.
                     if let compiled = compiler.compile(head: head) {
                         var bytes: [UInt8] = []
                         bytes.reserveCapacity(compiled.words.count * 4)
@@ -2383,6 +2707,11 @@ final class NovaJIT {
                         }
                         stats.blocksCompiled += 1
                         block = nb
+                        // Pass-through linking, compile-time call
+                        // (design §5 (a)): static sites whose target
+                        // is already cached link now; dynamic sites
+                        // are skipped (nil observed pc).
+                        fillLinks(for: nb, observedPc: nil, reason: nil)
                     } else {
                         // Head not compilable (foreign instruction,
                         // decode fault, stack region) or an internal
@@ -2394,6 +2723,7 @@ final class NovaJIT {
                         // within one flush epoch.
                         failedHeads.insert(head)
                     }
+                    nextSiteId = compiler.nextSiteId
                 }
 
                 guard let blk = block else { return }
@@ -2404,6 +2734,9 @@ final class NovaJIT {
                     budgetAllow <= timerAllow ? .budgetLimit : .timerLimit
                 statePtr.pointee.jitLimit = limit
                 statePtr.pointee.limitReason = limitKind.rawValue
+                // v0.0.72: seed the dispatched block's end-mode
+                // flags alongside the limit seeding (design §5).
+                statePtr.pointee.exitEndFlags = endFlags(of: blk)
                 statePtr.pointee.entryStatus = statePtr.pointee.status
                 statePtr.pointee.codeLo = codeLo
                 statePtr.pointee.codeHi = codeHi
@@ -2425,7 +2758,14 @@ final class NovaJIT {
             }
             let blk = d.blk
             let delta = d.delta
-            stats.blockEntries += 1
+            // v0.0.72: chained entries count as block entries
+            // (design §5; JitStats gains no new fields).
+            stats.blockEntries += 1 + statePtr.pointee.chainCount
+            // Pass-through linking, post-segment call (design
+            // §5 (b)): for the block that started the segment,
+            // with the segment's reason and exit pc.
+            fillLinks(for: blk, observedPc: statePtr.pointee.pc,
+                      reason: d.reason)
             stats.nativeInstructions += delta
             stepsUsed &+= delta
             // Settle the guest timer (design §5.3): every begun
@@ -2441,13 +2781,20 @@ final class NovaJIT {
 
             switch d.reason {
             case .next:
-                if blk.endFlushes {
+                // v0.0.72: the end-mode comes from
+                // state.exitEndFlags — the flags of the block that
+                // actually exited (the last block entered in a
+                // chain), not the segment's first block (design
+                // §5). For an unchained segment the seeded value
+                // equals blk's flags, preserving v0.0.71 behaviour.
+                let exitFlags = statePtr.pointee.exitEndFlags
+                if (exitFlags & 1) != 0 {
                     // DSPSET/CSPSET terminated this block (rule
                     // J2): drop the whole cache before dispatching
                     // anywhere else.
                     flushCache(countStat: true)
                 }
-                if blk.endIsCap || blk.endIsTerminator {
+                if (exitFlags & 2) != 0 || (exitFlags & 4) != 0 {
                     // Re-dispatch at state.pc as a fresh head: the
                     // cap fallthrough pc, or the terminator's
                     // resolved target / fallthrough pc, which its
