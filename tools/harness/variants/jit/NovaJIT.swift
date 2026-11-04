@@ -11,6 +11,16 @@
 // design's terminate-after form. Everything outside the compiled
 // groups still ends a block before the instruction and is
 // single-stepped via step().
+// Lane J4 completed the system set: ECALL/EBREAK as fault exits,
+// WFI as a native .wfi exit, MRET/CSRSET as block terminators,
+// CSRGET/RDCYCLE/CPUID inline, RDTIME/RDRAND as Swift helper
+// callouts (the interpreter's exact host expressions), plus the
+// D3 console callout experiment: a compiled STORE8/STORE64 whose
+// peeked address is exactly the console address calls the same
+// NovaMemory.mmioWrite path directly instead of peek-exiting to a
+// single-step (all other MMIO addresses keep the J3 peek-exit).
+// ROLL/MEMCPY remain the design's named bails. See
+// agent_notes/v071-j4.md for the full accounting.
 // This file contains:
 //   * the engine-indicator types the design names (agent_notes/
 //     v071-jit-design.md §2.3): NovaEnginePreference, NovaActiveEngine,
@@ -273,6 +283,17 @@ struct JitState {
     var dataStackBase: UInt64 = 0   // 328
     var callStackBase: UInt64 = 0   // 336
     var limitReason: UInt64 = 0     // 344
+    // J4 appended slots (offsets 352…376). Helper entry points for
+    // generated-code callouts (§6.4 RDTIME/RDRAND + the D3 console
+    // callout), filled by the trampoline once per run, and the
+    // guest-memory object pointer the console helper dereferences
+    // (Unmanaged-passUnretained bits; the NovaMemory instance
+    // outlives the run by construction — it is owned by the CPU's
+    // host, exactly as in the app engine).
+    var helperRdtime: UInt64 = 0    // 352
+    var helperRdrand: UInt64 = 0    // 360
+    var helperConsole: UInt64 = 0   // 368
+    var memPtr: UInt64 = 0          // 376
 
     static let flagN: UInt64 = 1 << 3
     static let flagZ: UInt64 = 1 << 2
@@ -489,6 +510,10 @@ enum JitOff {
     static let dataStackBase = 328
     static let callStackBase = 336
     static let limitReason = 344
+    static let helperRdtime = 352
+    static let helperRdrand = 360
+    static let helperConsole = 368
+    static let memPtr = 376
 
     static func verifyLayout() -> Bool {
         func off(_ kp: PartialKeyPath<JitState>) -> Int {
@@ -526,6 +551,10 @@ enum JitOff {
             && off(\JitState.dataStackBase) == dataStackBase
             && off(\JitState.callStackBase) == callStackBase
             && off(\JitState.limitReason) == limitReason
+            && off(\JitState.helperRdtime) == helperRdtime
+            && off(\JitState.helperRdrand) == helperRdrand
+            && off(\JitState.helperConsole) == helperConsole
+            && off(\JitState.memPtr) == memPtr
     }
 }
 
@@ -685,6 +714,11 @@ final class JitEmitter {
         emit(0xA8C00000 | (imm7 << 15) | (UInt32(rt2) << 10) | (UInt32(31) << 5) | UInt32(rt1))
     }
     func ret() { emit(0xD65F03C0) }
+    // J4: BLR Xn (0xD63F0000 | Rn<<5; cross-checked: blr x8 =
+    // 0xD63F0100). Used only by the helper callouts.
+    func blr(_ rn: Int) {
+        emit(0xD63F0000 | (UInt32(rn) << 5))
+    }
 }
 
 // MARK: - Block compiler (J2: stack + integer ALU; J3: memory + control flow)
@@ -731,6 +765,10 @@ final class JitBlockCompiler {
     // TRAP). compile() stops the block after such an instruction.
     var terminated = false
     var terminatorFlushes = false
+    // J4 / D3: when true, a compiled STORE8/STORE64 to exactly the
+    // console address takes the direct mmioWrite callout instead of
+    // the J3 peek-exit. Set from NovaCPU.jitD3Enabled per run.
+    let d3Enabled: Bool
 
     // AArch64 condition codes used below.
     private let ccEQ: UInt32 = 0, ccNE: UInt32 = 1, ccHS: UInt32 = 2, ccLO: UInt32 = 3
@@ -739,7 +777,8 @@ final class JitBlockCompiler {
 
     init(buf: UnsafeMutablePointer<UInt8>, ramSize: UInt64,
          dslim: UInt64, dataBase: UInt64, cslim: UInt64, callBase: UInt64,
-         vslim: UInt64, vectorBase: UInt64) {
+         vslim: UInt64, vectorBase: UInt64, d3Enabled: Bool = true) {
+        self.d3Enabled = d3Enabled
         self.buf = buf
         self.ramSize = ramSize
         self.dslim = dslim
@@ -914,6 +953,142 @@ final class JitBlockCompiler {
         em.b(foldLabel)
     }
 
+    /// Exit the block with reason .wfi and state.pc = a baked
+    /// target (WFI, J4 — design §6.3: delta includes the WFI, the
+    /// trampoline clears running and ends the run, exactly the
+    /// state hotRun's halted path leaves).
+    private func emitExitWfi(target: UInt64) {
+        em.loadImm64(9, target)
+        em.strOff(9, 19, JitOff.pc)
+        em.movz(0, 2)                                     // reason .wfi
+        em.b(foldLabel)
+    }
+
+    // ---- J4 helper callouts (design §6.4 + D3) ----
+    // Generated code's ONLY calls. AAPCS64 discipline: at an
+    // instruction boundary no guest value lives in a caller-saved
+    // register (guest values are memory-resident via x21/x22/x23,
+    // which are callee-saved, as are x20 delta and x24 limit), so a
+    // call clobbers nothing the block still needs. The link
+    // register is saved in x29 — codegen never uses x29 in a block
+    // body (the prologue only pushes the caller's pair) and it is
+    // callee-saved, so the helper preserves the saved LR in turn;
+    // the epilogue restores the original pair from the host stack
+    // regardless. Host SP is 16-byte aligned at every call site
+    // (the prologue's six stpPre total -96 bytes and generated code
+    // never adjusts SP).
+
+    /// Call the no-argument UInt64 helper whose address sits in
+    /// JitState at `helperOff`; its result lands in x13.
+    private func emitHelperCallU64(helperOff: Int) {
+        em.ldrOff(9, 19, helperOff)
+        em.movReg(29, 30)                                 // save LR
+        em.blr(9)
+        em.movReg(30, 29)                                 // restore LR
+        em.movReg(13, 0)                                  // result
+    }
+
+    /// Call the console helper with (state, value-in-x13): the
+    /// helper performs NovaMemory.mmioWrite(consoleAddr, value) —
+    /// the identical handler step() calls (same UTF-8 buffering,
+    /// same consoleOutput callback). x13 is consumed into x1
+    /// before the call.
+    private func emitConsoleCall() {
+        em.movReg(1, 13)                                  // arg1 = value
+        em.movReg(0, 19)                                  // arg0 = state
+        em.ldrOff(9, 19, JitOff.helperConsole)
+        em.movReg(29, 30)                                 // save LR
+        em.blr(9)
+        em.movReg(30, 29)                                 // restore LR
+    }
+
+    /// STORE8/STORE64 dispatch (J4, D3 experiment): like
+    /// emitMMIOPeekBail, but a peeked address of EXACTLY the
+    /// console address — with the value slot also proven readable,
+    /// so both pops are known to succeed — takes a third path:
+    /// boundary committed, both operands popped in step()'s order,
+    /// then the identical mmioWrite handler is called directly and
+    /// the block CONTINUES (no exit, no flush: the console handler
+    /// touches no guest RAM and no timer field, so rule J3's reason
+    /// for exiting — arbitrary host code writing RAM — does not
+    /// apply to it; every other MMIO address, file/net/timer
+    /// included, keeps the peek-exit + J5 flush). If either peek
+    /// fails, control falls to the same places the J3 bail uses:
+    /// an unreadable address slot goes to the inline body (whose
+    /// pops fault in step()'s order); a console address with an
+    /// unreadable value slot goes to the .singleStep stub, so
+    /// step() itself reproduces the half-popped fault state.
+    /// With d3Enabled == false this emits exactly the J3 sequence.
+    private func emitStoreDispatch(insnPc: UInt64, nextPc: UInt64,
+                                   is64: Bool) {
+        if !d3Enabled {
+            emitMMIOPeekBail(insnPc: insnPc)
+            emitStoreBody(is64: is64, nextPc: nextPc)
+            return
+        }
+        boundaryCheckOnly(insnPc: insnPc)
+        let body = em.newLabel()
+        let consolePath = em.newLabel()
+        let notConsole = em.newLabel()
+        let after = em.newLabel()
+        // Peek the address slot (no pop).
+        em.cmpReg(21, 27)                                 // dsp >= dataBase?
+        em.bcond(ccHS, body)
+        em.ldrOff(9, 19, JitOff.maxStart64)
+        em.cmpReg(21, 9)
+        em.bcond(ccHI, body)
+        em.addReg(10, 25, 21)
+        em.ldrOff(15, 10, 0)                              // peeked addr
+        em.loadImm64(9, NovaMemory.consoleAddr)
+        em.cmpReg(15, 9)
+        em.bcond(ccNE, notConsole)
+        // Address IS the console: peek the value slot (dsp + 8).
+        em.addImm(10, 21, 8)
+        em.cmpReg(10, 27)                                 // value slot readable?
+        em.bcond(ccHS, stubLabel(.singleStep(pc: insnPc)))
+        em.ldrOff(9, 19, JitOff.maxStart64)
+        em.cmpReg(10, 9)
+        em.bcond(ccHI, stubLabel(.singleStep(pc: insnPc)))
+        em.b(consolePath)
+        em.place(notConsole)
+        em.loadImm64(9, 0xFFFF_FFFF_FFFF_0000)
+        em.cmpReg(15, 9)
+        em.bcond(ccHS, stubLabel(.singleStep(pc: insnPc))) // other MMIO
+        em.b(body)                                        // RAM address
+        // Console fast path: pops cannot fault (both slots were
+        // just proven readable and nothing ran in between).
+        em.place(consolePath)
+        boundaryCommit()
+        emitDPop(dest: 15)                                // addr
+        emitDPop(dest: 13)                                // value
+        emitConsoleCall()
+        em.b(after)
+        // RAM path (and the unreadable-address fault path).
+        em.place(body)
+        boundaryCommit()
+        emitStoreBody(is64: is64, nextPc: nextPc)
+        em.place(after)
+    }
+
+    /// The inline RAM body of STORE8/STORE64 after the boundary
+    /// has been committed (shared by the J3 peek-bail path and the
+    /// J4 D3 dispatch): pop addr, pop value, checked store, J1.
+    private func emitStoreBody(is64: Bool, nextPc: UInt64) {
+        emitDPop(dest: 15)                                // addr
+        emitDPop(dest: 13)                                // value
+        if is64 {
+            emitStore64()                                 // x15 addr, x13 value
+            emitJ1Check(size: 8, nextPc: nextPc)
+        } else {
+            em.ldrOff(9, 19, JitOff.ramSize)
+            em.cmpReg(15, 9)
+            em.bcond(ccHS, faultLabel(.storeAccessFault))
+            em.addReg(10, 25, 15)
+            em.strbW(13, 10)                              // low byte (= v & 0xFF)
+            emitJ1Check(size: 1, nextPc: nextPc)
+        }
+    }
+
     /// CMP/TST flag capture: host NZCV (set by the preceding subs)
     /// is packed into JitState.flags (bit3 N, bit2 Z, bit1 C,
     /// bit0 V — the JitState packing). Only flag-neutral
@@ -1019,6 +1194,11 @@ final class JitBlockCompiler {
             return 0
         case 0xAE:
             return 1
+        // J4 system group.
+        case 0xC6, 0xC7:
+            return 1
+        case 0xC0, 0xC1, 0xC2, 0xC5, 0xCB, 0xCC, 0xF4, 0xF5:
+            return 0
         default:
             return nil
         }
@@ -1566,16 +1746,9 @@ final class JitBlockCompiler {
             em.addReg(10, 25, 15)
             em.ldrW(13, 10)
             emitDPush()
-        case 0x87: // STORE8 (MMIO-routed: peek bail first; RAM path + J1)
-            emitMMIOPeekBail(insnPc: insnPc)
-            emitDPop(dest: 15)                                // addr
-            emitDPop(dest: 13)                                // value
-            em.ldrOff(9, 19, JitOff.ramSize)
-            em.cmpReg(15, 9)
-            em.bcond(ccHS, faultLabel(.storeAccessFault))     // addr >= ramSize
-            em.addReg(10, 25, 15)
-            em.strbW(13, 10)                                  // low byte only (= v & 0xFF)
-            emitJ1Check(size: 1, nextPc: nextPc)
+        case 0x87: // STORE8 (MMIO-routed; D3 console callout or
+            // J3 peek bail, then the RAM body + J1 — J4)
+            emitStoreDispatch(insnPc: insnPc, nextPc: nextPc, is64: false)
         case 0x88: // STORE16 (never MMIO-routed; + J1)
             boundary(insnPc: insnPc)
             emitDPop(dest: 15)
@@ -1596,12 +1769,9 @@ final class JitBlockCompiler {
             em.addReg(10, 25, 15)
             em.strW(13, 10)                                   // low 32
             emitJ1Check(size: 4, nextPc: nextPc)
-        case 0x8A: // STORE64 (MMIO-routed: peek bail first; RAM path + J1)
-            emitMMIOPeekBail(insnPc: insnPc)
-            emitDPop(dest: 15)                                // addr
-            emitDPop(dest: 13)                                // value
-            emitStore64()                                     // x15 addr, x13 value
-            emitJ1Check(size: 8, nextPc: nextPc)
+        case 0x8A: // STORE64 (MMIO-routed; D3 console callout or
+            // J3 peek bail, then the RAM body + J1 — J4)
+            emitStoreDispatch(insnPc: insnPc, nextPc: nextPc, is64: true)
 
         // ---- Control-flow group (J3) — all block terminators ----
         // Targets for direct branches are baked at compile time
@@ -1719,6 +1889,107 @@ final class JitBlockCompiler {
             em.strOff(9, 19, JitOff.tval)
             em.b(faultLabel(.breakpoint))
             terminated = true
+
+        // ---- System group (J4) ----
+        // step()'s order is mirrored per opcode; faultPc already
+        // holds nextPc, so every fault exit below presents the
+        // interpreter's "pc past the operand, cycle counted" state.
+        case 0xC0: // ECALL — its whole semantics is the throw
+            // (design §6.3): fault exit ecallU; the trampoline
+            // hands it to handleTrapAfterStep, which vectors it
+            // exactly as it does for the interpreter.
+            boundary(insnPc: insnPc)
+            em.b(faultLabel(.ecallU))
+            terminated = true
+        case 0xC1: // EBREAK — fault exit breakpoint, no tval write
+            boundary(insnPc: insnPc)
+            em.b(faultLabel(.breakpoint))
+            terminated = true
+        case 0xC2: // MRET — pc := epc, status := savedStatus;
+            // terminator (dynamic target + status write, §6.2).
+            boundary(insnPc: insnPc)
+            em.ldrOff(13, 19, JitOff.epc)
+            em.ldrOff(14, 19, JitOff.savedStatus)
+            em.strOff(14, 19, JitOff.status)
+            emitExitNextDynamic(reg: 13)
+            terminated = true
+        case 0xC5: // WFI — native .wfi exit (design §6.3)
+            boundary(insnPc: insnPc)
+            emitExitWfi(target: nextPc)
+            terminated = true
+        case 0xC6: // CSRGET n — push CSR (0=epc, 1=cause, 2=status);
+            // any other operand faults with NO pop and NO tval
+            // write, exactly as step() (its pc is already past the
+            // operand, which faultPc reproduces).
+            boundary(insnPc: insnPc)
+            switch imm8() {
+            case 0: em.ldrOff(13, 19, JitOff.epc)
+            case 1: em.ldrOff(13, 19, JitOff.cause)
+            case 2: em.ldrOff(13, 19, JitOff.status)
+            default:
+                em.b(faultLabel(.illegalInstruction))
+                terminated = true
+            }
+            if !terminated { emitDPush() }
+        case 0xC7: // CSRSET n — pop FIRST (even for an invalid
+            // operand, as step() does), then store or fault;
+            // terminator so the trampoline recomputes the §5.3
+            // limit from the new status at the next dispatch.
+            boundary(insnPc: insnPc)
+            emitDPop(dest: 13)
+            switch imm8() {
+            case 0: em.strOff(13, 19, JitOff.epc)
+            case 1: em.strOff(13, 19, JitOff.cause)
+            case 2: em.strOff(13, 19, JitOff.status)
+            default:
+                em.b(faultLabel(.illegalInstruction))
+                terminated = true
+            }
+            if !terminated {
+                emitExitNext(target: nextPc)
+                terminated = true
+            }
+        case 0xCB: // RDTIME — helper callout (design §6.4): the
+            // helper evaluates the interpreter's exact expression,
+            // UInt64(Date().timeIntervalSince1970 * 1_000_000).
+            boundary(insnPc: insnPc)
+            emitHelperCallU64(helperOff: JitOff.helperRdtime)
+            emitDPush()
+        case 0xCC: // RDCYCLE — pushes cycle INCLUDING this
+            // instruction's own fetch increment: JitState.cycle is
+            // the block-entry cycle and x20 (delta) already counts
+            // this instruction (boundary ran first, §5.2).
+            boundary(insnPc: insnPc)
+            em.ldrOff(13, 19, JitOff.cycle)
+            em.addReg(13, 13, 20)
+            emitDPush()
+        case 0xF4: // RDRAND — helper callout (design §6.4): the
+            // helper returns UInt64.random(in: 0...UInt64.max).
+            boundary(insnPc: insnPc)
+            emitHelperCallU64(helperOff: JitOff.helperRdrand)
+            emitDPush()
+        case 0xF5: // CPUID — pure function of the popped leaf
+            // (design §6.1): pop, compare chain, push the constant.
+            boundary(insnPc: insnPc)
+            emitDPop(dest: 14)                                // leaf
+            let cpuidDone = em.newLabel()
+            let cpuidConsts: [(UInt32, UInt64)] = [
+                (0, 0x4E564F41),                              // "NOVA"
+                (1, 0x0200),                                  // version 2.0
+                (2, 0b0111),                                  // FP|SIMD|crypto
+                (3, 0x00312D61766F4E),                        // "Nova-1"
+            ]
+            for (leafVal, result) in cpuidConsts {
+                let skip = em.newLabel()
+                em.cmpImm(14, Int(leafVal))
+                em.bcond(ccNE, skip)
+                em.loadImm64(13, result)
+                em.b(cpuidDone)
+                em.place(skip)
+            }
+            em.movz(13, 0)                                    // default leaf
+            em.place(cpuidDone)
+            emitDPush()
         default:
             // Unreachable: compile() only calls for grouped opcodes.
             boundary(insnPc: insnPc)
@@ -1773,6 +2044,47 @@ final class JitBlockCompiler {
         }
         emitDPush()
     }
+}
+
+// MARK: - Helper callouts for generated code (J4, design §6.4 + D3)
+//
+// The only functions generated code ever calls, exported with C
+// linkage so their addresses can be baked into JitState and BLR'd
+// to. Each body is the interpreter's own code path, verbatim in
+// effect — the exactness argument for every callout is "same
+// expression / same handler, different caller".
+
+/// RDTIME 0xCB: step()'s exact host expression.
+@_cdecl("novaJitHelperRdtime")
+func novaJitHelperRdtime() -> UInt64 {
+    return UInt64(Date().timeIntervalSince1970 * 1_000_000)
+}
+
+/// RDRAND 0xF4: step()'s exact host expression.
+@_cdecl("novaJitHelperRdrand")
+func novaJitHelperRdrand() -> UInt64 {
+    return UInt64.random(in: 0...UInt64.max)
+}
+
+/// D3 console callout: performs NovaMemory.mmioWrite(consoleAddr,
+/// value) on the run's own memory object — the identical handler
+/// step() invokes for a console STORE8/STORE64 (same UTF-8
+/// buffering, same consoleOutput callback). The console branch of
+/// mmioWrite touches only the UTF-8 buffer and the callback: no
+/// guest RAM, no timer field — which is why calling it from inside
+/// withHotBuffer is safe (no checked-accessor exclusivity clash,
+/// no stale trampoline timer local) while the file/net/timer
+/// branches would not be, and why those addresses never take this
+/// path. `state` is the JitState pointer generated code already
+/// holds; the memory pointer is read from its memPtr slot.
+@_cdecl("novaJitHelperConsoleWrite")
+func novaJitHelperConsoleWrite(_ state: UnsafeMutableRawPointer,
+                               _ value: UInt64) {
+    let bits = state.load(fromByteOffset: JitOff.memPtr, as: UInt64.self)
+    guard bits != 0, let raw = UnsafeRawPointer(bitPattern: UInt(bits))
+        else { return }
+    let mem = Unmanaged<NovaMemory>.fromOpaque(raw).takeUnretainedValue()
+    mem.mmioWrite(NovaMemory.consoleAddr, value)
 }
 
 // MARK: - NovaJIT: probe + trampoline interface
@@ -1891,6 +2203,25 @@ final class NovaJIT {
             statePtr.deinitialize(count: 1)
             statePtr.deallocate()
         }
+        // J4: helper entry points + the memory-object pointer for
+        // the console callout, baked into JitState for generated
+        // code. Per-run values (rule J6 lifetime), set before the
+        // first dispatch; syncIn/syncOut never touch these slots.
+        statePtr.pointee.helperRdtime = UInt64(UInt(bitPattern:
+            unsafeBitCast(novaJitHelperRdtime
+                as @convention(c) () -> UInt64,
+                to: UnsafeRawPointer.self)))
+        statePtr.pointee.helperRdrand = UInt64(UInt(bitPattern:
+            unsafeBitCast(novaJitHelperRdrand
+                as @convention(c) () -> UInt64,
+                to: UnsafeRawPointer.self)))
+        statePtr.pointee.helperConsole = UInt64(UInt(bitPattern:
+            unsafeBitCast(novaJitHelperConsoleWrite
+                as @convention(c) (UnsafeMutableRawPointer, UInt64) -> Void,
+                to: UnsafeRawPointer.self)))
+        statePtr.pointee.memPtr = UInt64(UInt(bitPattern:
+            Unmanaged.passUnretained(cpu.memory).toOpaque()))
+
         var cache: [UInt64: CompiledBlock] = [:]
         var codeLo: UInt64 = 0
         var codeHi: UInt64 = 0
@@ -1989,7 +2320,8 @@ final class NovaJIT {
                         buf: buf, ramSize: ramSize,
                         dslim: limDslim, dataBase: limDataBase,
                         cslim: limCslim, callBase: limCallBase,
-                        vslim: limVslim, vectorBase: limVectorBase)
+                        vslim: limVslim, vectorBase: limVectorBase,
+                        d3Enabled: cpu.jitD3Enabled)
                     if let compiled = compiler.compile(head: head) {
                         var bytes: [UInt8] = []
                         bytes.reserveCapacity(compiled.words.count * 4)

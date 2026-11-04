@@ -83,6 +83,7 @@ var sandboxPath: String? = nil
 var consoleOutPath: String? = nil
 var metaOutPath: String? = nil
 var engineArg: String = "interpreter"
+var jitD3Arg: String = "on"
 
 let argv = CommandLine.arguments
 var ai = 1
@@ -109,8 +110,9 @@ while ai < argv.count {
     case "--console-out": consoleOutPath = nextVal(a)
     case "--meta-out": metaOutPath = nextVal(a)
     case "--engine": engineArg = nextVal(a)
+    case "--jit-d3": jitD3Arg = nextVal(a)
     case "--help":
-        print("usage: nova-harness --program P.bin [--firmware F.bin] [--load-addr N] [--entry N] [--r15 N] [--steps N] [--ram-mb N] [--timer-interval N] [--input TEXT] [--input-hex HEX] [--input-file F] [--sandbox DIR] [--engine interpreter|jit] --console-out FILE --meta-out FILE")
+        print("usage: nova-harness --program P.bin [--firmware F.bin] [--load-addr N] [--entry N] [--r15 N] [--steps N] [--ram-mb N] [--timer-interval N] [--input TEXT] [--input-hex HEX] [--input-file F] [--sandbox DIR] [--engine interpreter|jit] [--jit-d3 on|off] --console-out FILE --meta-out FILE")
         exit(0)
     default:
         die("unknown argument: \(a)")
@@ -128,6 +130,9 @@ guard ramMB >= 64 && ramMB <= 1024 else { die("--ram-mb must be in [64, 1024]") 
 guard engineArg == "interpreter" || engineArg == "jit" else {
     die("--engine must be interpreter or jit")
 }
+guard jitD3Arg == "on" || jitD3Arg == "off" else {
+    die("--jit-d3 must be on or off")
+}
 
 let memory = NovaMemory(totalSize: Int(ramMB) * 1024 * 1024)
 let cpu = NovaCPU()
@@ -142,6 +147,7 @@ cpu.memory = memory
 if engineArg == "jit" {
 #if NOVA_JIT_ENGINE
     cpu.requestedEngine = .jit
+    cpu.jitD3Enabled = (jitD3Arg == "on")
 #else
     die("--engine jit requires a harness built from the JIT variant core (variants/jit)")
 #endif

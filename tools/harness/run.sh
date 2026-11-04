@@ -322,6 +322,55 @@ cmd_gate_variant() {
     echo "--- bench console:"
     cat "$bout/bench.console" 2>/dev/null || true
     echo "--- end bench"
+    # J4 firmware-mode smoke (design §7.2, evidence only — never
+    # changes the gate's exit status): boot the app's embedded
+    # NovaShell firmware (bytes extracted from NovaFirmware.swift)
+    # with a scripted `help` line (--input-hex 68656c700a) under
+    # --timer-interval 100000 on
+    # BOTH engines and diff console/cycles/halt/pc. The shell is
+    # interactive and has no golden; the claim is only that the
+    # two engines agree with each other.
+    echo "== FIRMWARE SMOKE under both engines (evidence only, not gated)"
+    local fdir="$BUILD_DIR/fw-smoke-out"
+    mkdir -p "$fdir/sandbox-a" "$fdir/sandbox-b"
+    if build_harness current "$BUILD_DIR/nova-harness-current"; then
+      if python3 - "$ROOT/vm-app/NovaVM/VM/NovaFirmware.swift" "$fdir/novash.bin" <<'FWPYEOF'
+import re, sys
+src = open(sys.argv[1]).read()
+m = re.search(r"novaShellBytes[^=]*=\s*\[(.*?)\n\]", src, re.S)
+if not m:
+    sys.exit(1)
+vals = re.findall(r"0x[0-9a-fA-F]+", m.group(1))
+open(sys.argv[2], "wb").write(bytes(int(v, 16) for v in vals))
+print(f"extracted {len(vals)} firmware bytes")
+FWPYEOF
+      then
+        "$BUILD_DIR/nova-harness-current" --firmware "$fdir/novash.bin" \
+            --timer-interval 100000 --input-hex 68656c700a --steps 20000000 \
+            --sandbox "$fdir/sandbox-a" \
+            --console-out "$fdir/interp.console" --meta-out "$fdir/interp.meta" \
+            >"$fdir/interp.stdout" 2>"$fdir/interp.stderr" || true
+        "$bbin" --firmware "$fdir/novash.bin" --engine jit \
+            --timer-interval 100000 --input-hex 68656c700a --steps 20000000 \
+            --sandbox "$fdir/sandbox-b" \
+            --console-out "$fdir/jit.console" --meta-out "$fdir/jit.meta" \
+            >"$fdir/jit.stdout" 2>"$fdir/jit.stderr" || true
+        echo "--- interp meta:"; cat "$fdir/interp.meta" 2>/dev/null || true
+        echo "--- jit meta:"; cat "$fdir/jit.meta" 2>/dev/null || true
+        if cmp -s "$fdir/interp.console" "$fdir/jit.console" \
+           && cmp -s <(grep -E '^(cycles|halt|pc)=' "$fdir/interp.meta") <(grep -E '^(cycles|halt|pc)=' "$fdir/jit.meta"); then
+          echo "FIRMWARE-SMOKE: engines AGREE (console + cycles + halt + pc identical)"
+        else
+          echo "FIRMWARE-SMOKE: engines DIFFER (see fw-smoke-out artifacts in build/)"
+          echo "--- interp console (first 400 bytes):"; head -c 400 "$fdir/interp.console" 2>/dev/null || true; echo
+          echo "--- jit console (first 400 bytes):"; head -c 400 "$fdir/jit.console" 2>/dev/null || true; echo
+        fi
+      else
+        echo "FIRMWARE-SMOKE: SKIPPED (could not extract firmware bytes)"
+      fi
+    else
+      echo "FIRMWARE-SMOKE: SKIPPED (current-core harness build failed)"
+    fi
   fi
   return $fail
 }
@@ -349,15 +398,33 @@ cmd_speed_all() {
       fail=1
     fi
   done
+  # J4 speed-plumbing fix: speed.py invokes the binary directly and
+  # so bypassed run_one's --engine logic — the jit binary was timed
+  # running its interpreter fallback. speed.py forwards its args
+  # verbatim, so the fix is to hand it the engine args here, per
+  # binary, from the same .engine marker run_one reads. The jit
+  # binary is timed TWICE per workload — D3 console callout on and
+  # off (the J4 D3 A/B); every other binary is timed once, exactly
+  # as before.
   echo "== Speed-all: bench (speed-only, ~50.5M instructions, bare at 0x0, halts WFI) — best of $reps"
   ARGS=(--program "$BIN_DIR/bench.bin" --load-addr 0 --steps 200000000)
   for i in "${!labels[@]}"; do
-    python3 "$HARNESS_DIR/speed.py" $reps "${labels[$i]} bench" "${bins[$i]}" -- "${ARGS[@]}" --console-out "{console}" --meta-out "{meta}" || fail=1
+    if [ -f "${bins[$i]}.engine" ] && [ "$(cat "${bins[$i]}.engine")" = "jit" ]; then
+      python3 "$HARNESS_DIR/speed.py" $reps "${labels[$i]}(d3=on) bench" "${bins[$i]}" -- "${ARGS[@]}" --engine jit --jit-d3 on --console-out "{console}" --meta-out "{meta}" || fail=1
+      python3 "$HARNESS_DIR/speed.py" $reps "${labels[$i]}(d3=off) bench" "${bins[$i]}" -- "${ARGS[@]}" --engine jit --jit-d3 off --console-out "{console}" --meta-out "{meta}" || fail=1
+    else
+      python3 "$HARNESS_DIR/speed.py" $reps "${labels[$i]} bench" "${bins[$i]}" -- "${ARGS[@]}" --console-out "{console}" --meta-out "{meta}" || fail=1
+    fi
   done
   echo "== Speed-all: galaxy (print-heavy, ~9 KB console, pinned context) — best of $reps"
   set_case_args galaxy
   for i in "${!labels[@]}"; do
-    python3 "$HARNESS_DIR/speed.py" $reps "${labels[$i]} galaxy" "${bins[$i]}" -- "${ARGS[@]}" --console-out "{console}" --meta-out "{meta}" || fail=1
+    if [ -f "${bins[$i]}.engine" ] && [ "$(cat "${bins[$i]}.engine")" = "jit" ]; then
+      python3 "$HARNESS_DIR/speed.py" $reps "${labels[$i]}(d3=on) galaxy" "${bins[$i]}" -- "${ARGS[@]}" --engine jit --jit-d3 on --console-out "{console}" --meta-out "{meta}" || fail=1
+      python3 "$HARNESS_DIR/speed.py" $reps "${labels[$i]}(d3=off) galaxy" "${bins[$i]}" -- "${ARGS[@]}" --engine jit --jit-d3 off --console-out "{console}" --meta-out "{meta}" || fail=1
+    else
+      python3 "$HARNESS_DIR/speed.py" $reps "${labels[$i]} galaxy" "${bins[$i]}" -- "${ARGS[@]}" --console-out "{console}" --meta-out "{meta}" || fail=1
+    fi
   done
   echo "Note: bench is NOT a golden (its printed rates derive from RDTIME);"
   echo "only IPS is meaningful. Compare ratios within a column, not absolutes."

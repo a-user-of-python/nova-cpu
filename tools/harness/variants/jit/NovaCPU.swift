@@ -37,6 +37,10 @@ import Foundation
 //     handler is file-private) and jitSetStats (jitStats' setter is
 //     private(set)). No other change; from J2 the trampoline really
 //     drives runs when the probe succeeds.
+//   ADDITION 5 (lane J4) — one stored property, `jitD3Enabled`
+//     (default true): the D3 console-callout switch, read by the
+//     JIT compiler at block-compile time. The harness sets it from
+//     --jit-d3; the interpreter never reads it.
 //
 // Everything else — step(), hotRun(), handleTrapAfterStep(), the
 // whole interpreter — is byte-identical to the shipped core, and
@@ -93,6 +97,11 @@ final class NovaCPU {
     var requestedEngine: NovaEnginePreference = .interpreter
     private(set) var activeEngine: NovaActiveEngine = .interpreterHotloop
     private(set) var jitStats: JitStats? = nil
+    // [JIT J4 — ADDITION 5] D3 console callout switch (design §8
+    // D3): true = compiled STORE8/STORE64 to the console address
+    // call NovaMemory.mmioWrite directly; false = the J3 peek-exit
+    // for every MMIO store. Only the JIT compiler reads this.
+    var jitD3Enabled: Bool = true
 
     // General-purpose registers R0–R15 (programmer-visible)
     var regs: [UInt64] = Array(repeating: 0, count: 16)
