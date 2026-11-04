@@ -1,0 +1,65 @@
+name: NOVA Harness (golden baseline)
+
+# Golden-baseline harness for the v0.0.70 optimization pass.
+#   baseline — rebuild goldens from the SNAPSHOT core in tools/harness/baseline/
+#              and upload them as an artifact (commit them to make them the gate).
+#   gate     — build against the CURRENT vm-app core and diff vs the committed
+#              goldens (this is what push runs).
+#   speed    — time baseline vs current core (fib = compute, galaxy = print).
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Harness mode'
+        type: choice
+        options: [gate, baseline, speed]
+        default: 'gate'
+        required: true
+  push:
+    branches: [main]
+    paths:
+      - 'vm-app/NovaVM/VM/**'
+      - 'tools/harness/**'
+      - 'examples/**'
+      - 'novas.py'
+      - '.github/workflows/harness.yml'
+
+jobs:
+  harness:
+    name: Harness (${{ github.event.inputs.mode || 'gate' }})
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Show toolchain
+        run: swiftc --version
+
+      - name: Run harness
+        env:
+          MODE: ${{ github.event.inputs.mode || 'gate' }}
+        run: |
+          set -o pipefail
+          bash tools/harness/run.sh "$MODE" 2>&1 | tee harness-run.log
+
+      - name: Upload goldens (baseline mode)
+        if: ${{ (github.event.inputs.mode || 'gate') == 'baseline' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nova-goldens
+          path: tools/harness/golden/
+          if-no-files-found: error
+
+      - name: Upload harness logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-logs
+          path: |
+            harness-run.log
+            tools/harness/build/
+          if-no-files-found: warn
