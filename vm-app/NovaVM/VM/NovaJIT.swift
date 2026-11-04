@@ -58,6 +58,19 @@ import Darwin
 @_silgen_name("sys_icache_invalidate")
 private func novaJitSysICacheInvalidate(_ start: UnsafeMutableRawPointer, _ len: Int)
 
+/// `pthread_jit_write_protect_np` is marked unavailable in the iOS
+/// SDK headers (it is declared for macOS only), so an iOS build
+/// cannot call the imported declaration — the v0.0.71 app build
+/// failed on exactly that. The symbol itself exists in libsystem
+/// on both platforms and is what MAP_JIT write/execute toggling
+/// requires at runtime, so bind it directly under a local name —
+/// the same pattern as sys_icache_invalidate above. Behaviour is
+/// identical: same underlying function, same arguments. (Lane J5
+/// build fix, applied to BOTH copies so the harness variant and
+/// the shipped file stay byte-identical.)
+@_silgen_name("pthread_jit_write_protect_np")
+private func novaJitWriteProtectNp(_ enabled: Int32)
+
 /// The probe's smoke-test function shape: `mov w0, #42; ret`.
 private typealias JitFnConst = @convention(c) () -> Int32
 
@@ -430,7 +443,7 @@ final class JitCodeMemory {
             }
         case .mapJit:
             if !inWriteMode {
-                pthread_jit_write_protect_np(0) // 0 = writes allowed
+                novaJitWriteProtectNp(0) // 0 = writes allowed
                 inWriteMode = true
             }
         case .plainRWX:
@@ -449,7 +462,7 @@ final class JitCodeMemory {
             }
         case .mapJit:
             if inWriteMode {
-                pthread_jit_write_protect_np(1) // 1 = execute allowed
+                novaJitWriteProtectNp(1) // 1 = execute allowed
                 inWriteMode = false
             }
         case .plainRWX:
