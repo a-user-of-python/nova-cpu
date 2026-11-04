@@ -12,9 +12,14 @@ on:
       mode:
         description: 'Harness mode'
         type: choice
-        options: [gate, baseline, speed]
+        options: [gate, baseline, speed, speed-all, gate-variant]
         default: 'gate'
         required: true
+      variant:
+        description: 'Variant name/dir for gate-variant mode'
+        type: string
+        default: ''
+        required: false
   push:
     branches: [main]
     paths:
@@ -42,9 +47,14 @@ jobs:
       - name: Run harness
         env:
           MODE: ${{ github.event.inputs.mode || 'gate' }}
+          VARIANT: ${{ github.event.inputs.variant || '' }}
         run: |
           set -o pipefail
-          bash tools/harness/run.sh "$MODE" 2>&1 | tee harness-run.log
+          if [ "$MODE" = "gate-variant" ]; then
+            bash tools/harness/run.sh gate-variant "$VARIANT" 2>&1 | tee harness-run.log
+          else
+            bash tools/harness/run.sh "$MODE" 2>&1 | tee harness-run.log
+          fi
 
       - name: Upload goldens (baseline mode)
         if: ${{ (github.event.inputs.mode || 'gate') == 'baseline' }}

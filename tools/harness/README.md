@@ -21,8 +21,14 @@ tools/harness/
   fixtures/           vendored copies of the nova-programs test inputs
                       (that tree is not part of this repo — see fixtures/README.md)
   golden/             committed goldens: <program>.{console,cycles,halt}
-  run.sh              baseline | gate | speed | build  (set -o pipefail)
+  run.sh              baseline | gate | speed | build | speed-all |
+                      gate-variant  (set -o pipefail)
   speed.py            timing helper for speed mode
+  variants/           experimental cores, one directory per variant, each
+    <name>/             holding a NovaCPU.swift and optionally a
+                        NovaMemory.swift (absent = the current vm-app
+                        memory core is used). Variants are never the
+                        shipping core; they exist to be gated + timed.
   build/              scratch (gitignored): harness binaries, staged .bins, logs
 ```
 
@@ -109,6 +115,7 @@ is reconstructed from observable state, in priority order):
 | `galaxy` | `fixtures/galaxy.bin` (generator output, staged verbatim) | `0x10000`, R15=`0x10000` | 5 000 000 | **context-exact** — see below; ends in ECALL → `trap:ecallU` |
 | `bouncer` | `fixtures/bouncer.nova` (assembled) | `0x0` | 20 000 000 | **budget-prefix** — infinite loop |
 | `counter` | `fixtures/counter.nova` (assembled) | `0x0` | 40 000 000 | **budget-prefix** — infinite loop |
+| `selfmod` | `fixtures/selfmod.nova` (assembled) | `0x0` | 100 000 | **exact** — self-modifying code / decode-cache invalidation test; ends in WFI at 61 cycles, console `SCBDEK\n` |
 
 **Budget-prefix goldens** (`bouncer`, `counter`): these programs never halt
 by design (they are NovaShell scheduler demos). The invariant is: *at exactly
@@ -234,7 +241,19 @@ bash tools/harness/run.sh baseline   # regenerate goldens from the snapshot core
 bash tools/harness/run.sh gate       # diff current core against goldens
 bash tools/harness/run.sh speed      # baseline vs current instructions/sec
 bash tools/harness/run.sh build      # compile-check the current core only
+bash tools/harness/run.sh speed-all  # baseline + current + every variants/*/
+                                     # core, timed on bench + galaxy
+bash tools/harness/run.sh gate-variant hotloop
+                                     # diff one variant core (dir path or
+                                     # bare variant name) against goldens
 ```
+
+`speed-all` auto-discovers variant directories by glob, so adding a
+variant needs no script edits. A variant directory must contain
+`NovaCPU.swift`; if it also contains `NovaMemory.swift` that file is
+used, otherwise the variant is paired with the current `vm-app`
+`NovaMemory.swift` (the compile contract is the same as the gate's:
+`main.swift` + one CPU/memory pair, public API identical).
 
 Manual harness invocation (flags in `main.swift`, `--help` prints usage):
 

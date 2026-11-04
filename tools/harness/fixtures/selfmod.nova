@@ -1,0 +1,128 @@
+; selfmod.nova — self-modifying-code test for decode-cache invalidation.
+;
+; Purpose: expose any interpreter that executes STALE decoded code after
+; the guest has overwritten its own instruction bytes. The baseline switch
+; interpreter has no decode cache, so it always sees fresh bytes; the
+; golden for this program is whatever the baseline prints. A block-cache
+; variant that fails to invalidate on guest stores prints different bytes.
+;
+; Addressing: novas.py resolves `PUSH64 <label>` to the label's absolute
+; byte address (see novas.py, PUSH64 case: `if arg in labels: v =
+; labels[arg]`). Labels are offsets from the start of the binary, and the
+; harness loads bare programs at 0x0, so a label's assembled value IS its
+; runtime address — no generator patching and no fixed hand-computed
+; offsets are needed. This fixture must be run bare at load address 0x0
+; (same as hello/hi). Every patch below stores ONE byte: the immediate
+; byte of a PUSH8, located at (label of the PUSH8 opcode) + 1.
+;
+; STORE8 operand order (per NovaCPU + hi.nova): the stack holds
+; [value, address] with the address on top; STORE8 pops address, then
+; value. The patch idiom is therefore:
+;     PUSH8 <new immediate byte>
+;     PUSH64 <label of target PUSH8>
+;     PUSH8 1
+;     ADD                ; address + 1 -> the immediate byte
+;     STORE8             ; mem[label+1] = new byte
+;
+; Console: STORE8 of a byte to 0xFFFFFFFFFFFF0000 (kept in R0), exactly
+; like hi.nova. Output alphabet: each phase prints one character whose
+; value depends on whether its patch took effect, framed by a fixed
+; header 'S' and footer "K\n" so truncation/reordering also shows.
+;
+; Expected console (fresh bytes everywhere):  SCBDEK\n   (7 bytes)
+;   'S'  fixed header
+;   'C'  phase 1a — patched 'A'(65) -> 'C'(67); stale decode prints 'A'
+;   'B'  phase 1b — patched 'A'(65) -> 'B'(66); stale decode prints 'A'
+;   'D'  phase 2, iteration 1 — unpatched 'D'(68), always 'D'
+;   'E'  phase 2, iteration 2 — patched 'D'(68) -> 'E'(69);
+;        a cache that kept the first iteration's block prints 'D' again
+;   'K'  fixed footer, then '\n'; program halts with WFI.
+; Expected cycles: 61 (one per executed instruction, WFI included).
+; Hand trace: see fixtures/README.md (selfmod entry) and
+; agent_notes/v070-agg-b.md.
+
+main:
+    PUSH64 0xFFFFFFFFFFFF0000
+    POPR 0                     ; R0 = console MMIO address
+
+    ; ---- header marker 'S' ----
+    PUSH8 83                   ; 'S'
+    PUSHR 0
+    STORE8
+
+    ; ---- Phase 1a: patch, then FALL THROUGH into the patched byte ----
+    ; The patching STORE8 and the patched PUSH8 are in the same
+    ; straight-line run with no branch between them, so any basic block
+    ; decoded from `main` (or from the last branch target above) already
+    ; contains the OLD byte when the store executes. A cache must notice
+    ; the store hitting its own block and re-decode the remainder.
+    PUSH8 67                   ; 'C' — new immediate
+    PUSH64 p1a_push
+    PUSH8 1
+    ADD
+    STORE8                     ; mem[p1a_push + 1] = 67
+p1a_push:
+    PUSH8 65                   ; 'A' — becomes PUSH8 67 before it executes
+    PUSHR 0
+    STORE8                     ; prints 'C' fresh / 'A' stale
+
+    ; ---- Phase 1b: patch a not-yet-executed CALL target, then CALL it --
+    ; The literal case from the test spec: overwrite an instruction that
+    ; has never executed, then transfer control into the patched region.
+    ; Catches interpreters that decode eagerly (e.g. whole-program
+    ; pre-decode at load/run start) as well as stale per-block caches.
+    PUSH8 66                   ; 'B' — new immediate
+    PUSH64 p1b_push
+    PUSH8 1
+    ADD
+    STORE8                     ; mem[p1b_push + 1] = 66
+    CALL p1b_body              ; prints patched char, returns
+
+    ; ---- Phase 2: patch code that has ALREADY executed once ----
+    ; p2_loop executes with the original byte ('D'), the body then
+    ; patches its own first instruction, and the loop re-enters the same
+    ; block head. The second iteration must see 'E'. This kills caches
+    ; that invalidate only when a block is first decoded, and any
+    ; persistent cache with no store invalidation at all.
+    PUSH8 0
+    POPR 1                     ; R1 = iteration counter = 0
+p2_loop:
+p2_push:
+    PUSH8 68                   ; 'D' — becomes PUSH8 69 after iteration 1
+    PUSHR 0
+    STORE8                     ; prints 'D' on iter 1, 'E' on iter 2
+    PUSHR 1
+    PUSH8 1
+    ADD
+    POPR 1                     ; R1 += 1
+    PUSHR 1
+    PUSH8 1
+    EQ                         ; R1 == 1?
+    BNZ p2_patch               ; after iteration 1: go patch, then loop
+    JMP p2_done
+p2_patch:
+    PUSH8 69                   ; 'E' — new immediate
+    PUSH64 p2_push
+    PUSH8 1
+    ADD
+    STORE8                     ; mem[p2_push + 1] = 69
+    JMP p2_loop
+p2_done:
+    ; ---- footer 'K' + newline, then halt ----
+    PUSH8 75                   ; 'K'
+    PUSHR 0
+    STORE8
+    PUSH8 10                   ; '\n'
+    PUSHR 0
+    STORE8
+    WFI
+
+; Phase 1b target. Placed after WFI so it is reachable ONLY via the CALL
+; above (never by fall-through), and it has never executed when the
+; phase-1b store patches it.
+p1b_body:
+p1b_push:
+    PUSH8 65                   ; 'A' — becomes PUSH8 66 before the CALL
+    PUSHR 0
+    STORE8                     ; prints 'B' fresh / 'A' stale
+    RET

@@ -12,6 +12,13 @@
 #              (speed-only, never a golden), fixed budgets, reporting
 #              instructions/sec for each.
 #   build      Build the harness against the current core only (smoke check).
+#   speed-all  Build baseline, current, and EVERY variant core under
+#              variants/*/ and time each on bench + galaxy (same budgets
+#              as speed mode), printing one table per workload.
+#   gate-variant <dir>
+#              Build the harness against the variant core in <dir> (a
+#              variants/<name> directory, or a bare variant name) and
+#              diff every program against the committed goldens.
 #
 # Everything Swift is compiled with the system swiftc (Xcode) on the CI
 # runner — there is no SwiftPM/Xcode project involved on purpose.
@@ -32,7 +39,7 @@ NOVAS="$ROOT/novas.py"
 #                  PREFIX, cycles (== budget) and halt=step-budget are exact
 #   context-exact  exact, but only under the pinned NovaShell scheduler
 #                  context documented in README.md (galaxy)
-CASES="hello fib galaxy_examples hi galaxy_fixed galaxy bouncer counter"
+CASES="hello fib galaxy_examples hi galaxy_fixed galaxy bouncer counter selfmod"
 
 # Per-case harness arguments: fills the ARGS array. $1 = case name.
 set_case_args() {
@@ -45,6 +52,7 @@ set_case_args() {
     galaxy)         ARGS=(--program "$BIN_DIR/galaxy.bin"         --load-addr 65536 --r15 65536 --steps 5000000) ;;
     bouncer)        ARGS=(--program "$BIN_DIR/bouncer.bin"        --load-addr 0      --steps 20000000) ;;
     counter)        ARGS=(--program "$BIN_DIR/counter.bin"        --load-addr 0      --steps 40000000) ;;
+    selfmod)        ARGS=(--program "$BIN_DIR/selfmod.bin"        --load-addr 0      --steps 100000) ;;
     *) echo "run.sh: unknown case $1" >&2; return 1 ;;
   esac
 }
@@ -59,6 +67,7 @@ prepare_bins() {
   python3 "$NOVAS" "$FIX_DIR/galaxy_fixed.nova"           -o "$BIN_DIR/galaxy_fixed.bin" >/dev/null || return 1
   python3 "$NOVAS" "$FIX_DIR/bouncer.nova"                -o "$BIN_DIR/bouncer.bin"      >/dev/null || return 1
   python3 "$NOVAS" "$FIX_DIR/counter.nova"                -o "$BIN_DIR/counter.bin"      >/dev/null || return 1
+  python3 "$NOVAS" "$FIX_DIR/selfmod.nova"                -o "$BIN_DIR/selfmod.bin"      >/dev/null || return 1
   # Generated binaries: the checked-in .nova files for both galaxy programs
   # are PLACEHOLDER TEMPLATES (PUSH64 0xDEADBEEF... addresses patched by
   # gen_galaxy.py, data appended after the code). novas.py alone cannot
@@ -93,6 +102,23 @@ build_harness() {
     mem="$ROOT/vm-app/NovaVM/VM/NovaMemory.swift"
   fi
   echo "== Building harness against $kind core -> $out"
+  "${SWIFTC[@]}" -O -o "$out" "$HARNESS_DIR/main.swift" "$cpu" "$mem"
+}
+
+# build_harness_dir <variant-dir> <output-binary>
+# Builds the harness against a variant core: the directory's
+# NovaCPU.swift, plus its NovaMemory.swift when it carries one,
+# otherwise the current vm-app NovaMemory.swift (variants that only
+# change the CPU share the shipping memory core).
+build_harness_dir() {
+  local dir="$1" out="$2" cpu mem
+  cpu="$dir/NovaCPU.swift"
+  if [ -f "$dir/NovaMemory.swift" ]; then
+    mem="$dir/NovaMemory.swift"
+  else
+    mem="$ROOT/vm-app/NovaVM/VM/NovaMemory.swift"
+  fi
+  echo "== Building harness against variant core $dir -> $out"
   "${SWIFTC[@]}" -O -o "$out" "$HARNESS_DIR/main.swift" "$cpu" "$mem"
 }
 
@@ -203,10 +229,98 @@ cmd_build() {
   build_harness current "$BUILD_DIR/nova-harness-current"
 }
 
+# gate-variant <dir>: like gate, but against the variant core in <dir>
+# (which may also be given as a bare variant name under variants/).
+cmd_gate_variant() {
+  local dir="${1:-}"
+  if [ -z "$dir" ]; then
+    echo "usage: $0 gate-variant <variant-dir>" >&2
+    return 2
+  fi
+  if [ ! -f "$dir/NovaCPU.swift" ]; then
+    if [ -f "$HARNESS_DIR/variants/$dir/NovaCPU.swift" ]; then
+      dir="$HARNESS_DIR/variants/$dir"
+    else
+      echo "run.sh: no NovaCPU.swift in variant dir: $dir" >&2
+      return 2
+    fi
+  fi
+  dir="$(cd "$dir" && pwd)"
+  local vname
+  vname="$(basename "$dir")"
+  if ! ls "$GOLDEN_DIR"/*.cycles >/dev/null 2>&1; then
+    echo "run.sh: no committed goldens in $GOLDEN_DIR — run 'run.sh baseline' first and commit the result." >&2
+    return 2
+  fi
+  mkdir -p "$BUILD_DIR"
+  build_harness_dir "$dir" "$BUILD_DIR/nova-harness-variant-$vname" || return 1
+  prepare_bins || return 1
+  local out="$BUILD_DIR/gate-variant-$vname-out" fail=0 cname status detail
+  rm -rf "$out"; mkdir -p "$out"
+  echo "== Gate variant: $vname ($dir)"
+  printf '%-18s %-10s %s\n' "PROGRAM" "RESULT" "DETAIL"
+  for cname in $CASES; do
+    status="PASS"; detail=""
+    if [ ! -f "$GOLDEN_DIR/$cname.cycles" ]; then
+      status="FAIL"; detail="no golden committed"
+    elif ! run_one "$BUILD_DIR/nova-harness-variant-$vname" "$cname" "$out"; then
+      status="FAIL"; detail="harness run failed (see $out/$cname.stderr)"
+    else
+      cmp -s "$GOLDEN_DIR/$cname.console" "$out/$cname.console" || { status="FAIL"; detail="console differs"; }
+      cmp -s "$GOLDEN_DIR/$cname.cycles"  "$out/$cname.cycles"  || { status="FAIL"; detail="${detail:+$detail; }cycles: golden=$(cat "$GOLDEN_DIR/$cname.cycles") got=$(cat "$out/$cname.cycles")"; }
+      cmp -s "$GOLDEN_DIR/$cname.halt"    "$out/$cname.halt"    || { status="FAIL"; detail="${detail:+$detail; }halt: golden=$(cat "$GOLDEN_DIR/$cname.halt") got=$(cat "$out/$cname.halt")"; }
+    fi
+    printf '%-18s %-10s %s\n' "$cname" "$status" "$detail"
+    [ "$status" = "FAIL" ] && fail=1
+  done
+  if [ $fail -eq 0 ]; then echo "== GATE ($vname): all programs match the golden baseline"; else echo "== GATE ($vname): MISMATCHES FOUND"; fi
+  return $fail
+}
+
+# speed-all: baseline + current + every variants/*/ core, timed on
+# bench and galaxy with the same budgets as speed mode. Variants are
+# auto-discovered by glob — new variant dirs need no script edits.
+cmd_speed_all() {
+  mkdir -p "$BUILD_DIR"
+  build_harness baseline "$BUILD_DIR/nova-harness-baseline" || return 1
+  build_harness current  "$BUILD_DIR/nova-harness-current"  || return 1
+  prepare_bins || return 1
+  local reps=5 fail=0 i vdir vname
+  local labels=("baseline" "current")
+  local bins=("$BUILD_DIR/nova-harness-baseline" "$BUILD_DIR/nova-harness-current")
+  for vdir in "$HARNESS_DIR"/variants/*/; do
+    [ -d "$vdir" ] || continue
+    [ -f "$vdir/NovaCPU.swift" ] || continue
+    vname="$(basename "$vdir")"
+    if build_harness_dir "$vdir" "$BUILD_DIR/nova-harness-variant-$vname"; then
+      labels+=("variant:$vname")
+      bins+=("$BUILD_DIR/nova-harness-variant-$vname")
+    else
+      echo "== speed-all: variant $vname FAILED TO BUILD (skipped)"
+      fail=1
+    fi
+  done
+  echo "== Speed-all: bench (speed-only, ~50.5M instructions, bare at 0x0, halts WFI) — best of $reps"
+  ARGS=(--program "$BIN_DIR/bench.bin" --load-addr 0 --steps 200000000)
+  for i in "${!labels[@]}"; do
+    python3 "$HARNESS_DIR/speed.py" $reps "${labels[$i]} bench" "${bins[$i]}" -- "${ARGS[@]}" --console-out "{console}" --meta-out "{meta}" || fail=1
+  done
+  echo "== Speed-all: galaxy (print-heavy, ~9 KB console, pinned context) — best of $reps"
+  set_case_args galaxy
+  for i in "${!labels[@]}"; do
+    python3 "$HARNESS_DIR/speed.py" $reps "${labels[$i]} galaxy" "${bins[$i]}" -- "${ARGS[@]}" --console-out "{console}" --meta-out "{meta}" || fail=1
+  done
+  echo "Note: bench is NOT a golden (its printed rates derive from RDTIME);"
+  echo "only IPS is meaningful. Compare ratios within a column, not absolutes."
+  return $fail
+}
+
 case "${1:-}" in
-  baseline) cmd_baseline ;;
-  gate)     cmd_gate ;;
-  speed)    cmd_speed ;;
-  build)    cmd_build ;;
-  *) echo "usage: $0 {baseline|gate|speed|build}" >&2; exit 2 ;;
+  baseline)     cmd_baseline ;;
+  gate)         cmd_gate ;;
+  speed)        cmd_speed ;;
+  build)        cmd_build ;;
+  speed-all)    cmd_speed_all ;;
+  gate-variant) cmd_gate_variant "${2:-}" ;;
+  *) echo "usage: $0 {baseline|gate|speed|build|speed-all|gate-variant <dir>}" >&2; exit 2 ;;
 esac
