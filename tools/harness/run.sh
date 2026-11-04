@@ -8,8 +8,9 @@
 #              every program against the committed goldens. Exit 1 on any
 #              mismatch; prints a per-program PASS/FAIL table.
 #   speed      Build BOTH cores and time them on a compute-bound program
-#              (fib) and a print-heavy program (galaxy), fixed budgets,
-#              reporting instructions/sec for each.
+#              (fib), a print-heavy program (galaxy) and the bench workload
+#              (speed-only, never a golden), fixed budgets, reporting
+#              instructions/sec for each.
 #   build      Build the harness against the current core only (smoke check).
 #
 # Everything Swift is compiled with the system swiftc (Xcode) on the CI
@@ -66,6 +67,9 @@ prepare_bins() {
   # staged verbatim. See README.md.
   cp "$FIX_DIR/examples_galaxy.bin" "$BIN_DIR/galaxy_examples.bin" || return 1
   cp "$FIX_DIR/galaxy.bin"       "$BIN_DIR/galaxy.bin"          || return 1
+  # bench is a SPEED-ONLY workload (never a golden — see README.md): staged
+  # here so cmd_speed can time it; it is deliberately NOT in $CASES.
+  cp "$FIX_DIR/bench.bin"        "$BIN_DIR/bench.bin"           || return 1
 }
 
 # swiftc discovery (macOS CI: Xcode's swiftc is on PATH; xcrun is the fallback).
@@ -182,6 +186,13 @@ cmd_speed() {
   set_case_args galaxy
   python3 "$HARNESS_DIR/speed.py" $reps "baseline galaxy" "$BUILD_DIR/nova-harness-baseline" -- "${ARGS[@]}" --console-out "{console}" --meta-out "{meta}" || return 1
   python3 "$HARNESS_DIR/speed.py" $reps "current  galaxy" "$BUILD_DIR/nova-harness-current"  -- "${ARGS[@]}" --console-out "{console}" --meta-out "{meta}" || return 1
+  echo "== Speed: bench (speed-only, ~50.5M instructions, bare at 0x0, halts WFI) — best of $reps"
+  echo "   bench is NOT a golden: its printed rates derive from RDTIME (wall"
+  echo "   clock), so its console bytes are non-deterministic by design. Only"
+  echo "   its cycle count is deterministic, and only IPS is reported here."
+  ARGS=(--program "$BIN_DIR/bench.bin" --load-addr 0 --steps 200000000)
+  python3 "$HARNESS_DIR/speed.py" $reps "baseline bench" "$BUILD_DIR/nova-harness-baseline" -- "${ARGS[@]}" --console-out "{console}" --meta-out "{meta}" || return 1
+  python3 "$HARNESS_DIR/speed.py" $reps "current  bench" "$BUILD_DIR/nova-harness-current"  -- "${ARGS[@]}" --console-out "{console}" --meta-out "{meta}" || return 1
   echo "Note: ips = guest cycles / best wall time of the whole harness process"
   echo "(includes VM allocation + program load). Short runs are noise-prone;"
   echo "compare baseline vs current ratios, not absolute numbers."

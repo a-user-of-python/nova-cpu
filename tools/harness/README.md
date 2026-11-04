@@ -210,10 +210,22 @@ Locally there is no Swift toolchain, so the supported path is CI
   Exit code is non-zero on any mismatch; the log prints a per-program
   PASS/FAIL table with the differing field (console / cycles / halt).
 * **Speed:** mode `speed`. Times baseline vs current on `fib`
-  (compute-bound, runs to WFI) and `galaxy` (print-heavy, ~9 KB of console),
-  best of 5 whole-process runs each, printing guest cycles, wall time and
-  instructions/sec for each core. Short runs are noise-prone — compare the
-  baseline/current ratio, not absolute IPS.
+  (compute-bound, runs to WFI), `galaxy` (print-heavy, ~9 KB of console) and
+  `bench` (speed-only workload, see below), best of 5 whole-process runs
+  each, printing guest cycles, wall time and instructions/sec for each core.
+  Short runs are noise-prone — compare the baseline/current ratio, not
+  absolute IPS.
+
+**`bench` — speed-only, never a golden.** `fixtures/bench.bin` (vendored
+from `nova-programs/bench/`, sha256
+`3040c56c618ebc812306b91341bdee3676f80de4c8783484c9a2d2b7fed765ce`) is timed
+by `run.sh speed` only: bare mode, loaded at `0x0`, 200 M step budget (it
+executes ~50.5 M instructions and halts WFI). It is deliberately **not** in
+the golden manifest (`CASES` in `run.sh`) and must never join the gate: its
+printed rates derive from `RDTIME` (host wall clock — see the determinism
+audit), so its console bytes are non-deterministic, even though its cycle
+count is deterministic. Only its instructions/sec is a meaningful harness
+output.
 
 On any Mac with Xcode, the same commands work directly:
 
