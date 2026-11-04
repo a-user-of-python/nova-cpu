@@ -1583,42 +1583,63 @@ final class NovaJIT {
             flushCache(countStat: true)
         }
 
-        cpu.memory.withHotBuffer { (buf: UnsafeMutablePointer<UInt8>) in
-            let ramSize = UInt64(cpu.memory.totalSize)
-            while !finished && cpu.running && stepsUsed < maxSteps {
-                // State authority: after a block, cpu was syncOut'ed
-                // from `state`; after a step()/trap, cpu holds the
-                // interpreter's own state. Re-syncing `state` from
-                // cpu at every dispatch is therefore always correct.
-                statePtr.pointee.syncIn(from: cpu)
+        // NOTE on buffer scope: withHotBuffer holds a MODIFY access
+        // on NovaMemory.bytes for its whole closure, so calling any
+        // checked accessor (step(), handleTrapAfterStep's pushes,
+        // read64/write64) inside it is a Swift exclusivity violation
+        // and aborts. The buffer closure below therefore covers ONLY
+        // compilation (raw-pointer reads) and the generated-code
+        // call (raw-pointer accesses) — exactly hotRun's discipline.
+        // All step() calls, trap handling and accounting happen
+        // outside it.
+        let ramSize = UInt64(cpu.memory.totalSize)
+        while !finished && cpu.running && stepsUsed < maxSteps {
+            // State authority: after a block, cpu was syncOut'ed
+            // from the JitState; after a step()/trap, cpu holds the
+            // interpreter's own state. Re-syncing the JitState from
+            // cpu at every dispatch is therefore always correct.
+            statePtr.pointee.syncIn(from: cpu)
+
+            let interval = cpu.memory.timerInterval
+            let armed = interval > 0 && (statePtr.pointee.status & 1) != 0
+
+            // Defensive timer corner (design §5.3): an armed timer
+            // whose countdown is already 0 cannot enter a block
+            // (timerAllow would underflow). Emulate the firing
+            // exactly as hotRun's timer path does: reset the
+            // countdown, count one step, flush (J4), vector.
+            if armed && cpu.memory.timerCount == 0 {
+                cpu.memory.timerCount = interval
+                stepsUsed &+= 1
+                stats.limitExits += 1
+                flushCache(countStat: true)
+                cpu.jitHandleTrapAfterStep(.timerInterrupt)
+                continue
+            }
+
+            let head = statePtr.pointee.pc
+            // Scalars the compile+execute segment needs, read before
+            // entering the buffer closure.
+            let timerAllow: UInt64 = armed ? (cpu.memory.timerCount &- 1) : UInt64.max
+            let budgetAllow = maxSteps &- stepsUsed
+            let limDslim = cpu.dslim
+            let limDataBase = cpu.memory.dataStackBase
+            let limCslim = cpu.cslim
+            let limCallBase = cpu.memory.callStackBase
+            let limVslim = cpu.vslim
+            let limVectorBase = cpu.memory.vectorStackBase
+
+            var dispatch: (reason: JitExitReason, delta: UInt64, blk: CompiledBlock)? = nil
+            cpu.memory.withHotBuffer { (buf: UnsafeMutablePointer<UInt8>) in
                 statePtr.pointee.ramBase = UInt64(UInt(bitPattern: buf))
-
-                let interval = cpu.memory.timerInterval
-                let armed = interval > 0 && (statePtr.pointee.status & 1) != 0
-
-                // Defensive timer corner (design §5.3): an armed
-                // timer whose countdown is already 0 cannot enter a
-                // block (timerAllow would underflow). Emulate the
-                // firing exactly as hotRun's timer path does: reset
-                // the countdown, count one step, flush (J4), vector.
-                if armed && cpu.memory.timerCount == 0 {
-                    cpu.memory.timerCount = interval
-                    stepsUsed &+= 1
-                    stats.limitExits += 1
-                    flushCache(countStat: true)
-                    cpu.jitHandleTrapAfterStep(.timerInterrupt)
-                    continue
-                }
-
-                let head = statePtr.pointee.pc
                 var block = cache[head]
 
                 if block == nil && !failedHeads.contains(head) {
                     let compiler = JitBlockCompiler(
                         buf: buf, ramSize: ramSize,
-                        dslim: cpu.dslim, dataBase: cpu.memory.dataStackBase,
-                        cslim: cpu.cslim, callBase: cpu.memory.callStackBase,
-                        vslim: cpu.vslim, vectorBase: cpu.memory.vectorStackBase)
+                        dslim: limDslim, dataBase: limDataBase,
+                        cslim: limCslim, callBase: limCallBase,
+                        vslim: limVslim, vectorBase: limVectorBase)
                     if let compiled = compiler.compile(head: head) {
                         var bytes: [UInt8] = []
                         bytes.reserveCapacity(compiled.words.count * 4)
@@ -1652,25 +1673,19 @@ final class NovaJIT {
                     } else {
                         // Head not compilable (foreign instruction,
                         // decode fault, stack region) or an internal
-                        // emitter failure: single-step it. Emitter
-                        // failures degrade this head for the rest of
-                        // the run (rule J7); a merely-foreign head
-                        // costs one compile attempt per dispatch —
-                        // it is reached again only after a flush or a
-                        // block that ends before it, and J5 flushes
-                        // follow every single-step anyway.
+                        // emitter failure: single-step it (outside
+                        // the buffer closure). failedHeads is cleared
+                        // by every flush, and every single-step is
+                        // followed by a flush, so this only ever
+                        // suppresses duplicate compile attempts
+                        // within one flush epoch.
                         failedHeads.insert(head)
                     }
                 }
 
-                guard let blk = block else {
-                    singleStep()
-                    continue
-                }
+                guard let blk = block else { return }
 
                 // ---- Dispatch the block (design §5.3) ----
-                let timerAllow: UInt64 = armed ? (cpu.memory.timerCount &- 1) : UInt64.max
-                let budgetAllow = maxSteps &- stepsUsed
                 let limit = min(UInt64(blk.instructionCount), timerAllow, budgetAllow)
                 let limitKind: JitExitReason =
                     budgetAllow <= timerAllow ? .budgetLimit : .timerLimit
@@ -1686,67 +1701,76 @@ final class NovaJIT {
                                        to: JitBlockFunction.self)
                 let reasonRaw = fn(UnsafeMutableRawPointer(statePtr))
                 let reason = JitExitReason(rawValue: reasonRaw) ?? .next
-                let delta = statePtr.pointee.lastDelta
-                stats.blockEntries += 1
-                stats.nativeInstructions += delta
-                stepsUsed &+= delta
-                // Settle the guest timer (design §5.3): every begun
-                // instruction (delta includes a faulting one, and
-                // excludes a bailed one) decremented the countdown
-                // once in step()'s check. delta <= timerAllow when
-                // armed, so this cannot underflow.
-                if armed {
-                    cpu.memory.timerCount &-= delta
-                }
-                statePtr.pointee.syncOut(to: cpu)
-                cpu.jitSetStats(stats)
+                dispatch = (reason: reason,
+                            delta: statePtr.pointee.lastDelta,
+                            blk: blk)
+            }
 
-                switch reason {
-                case .next:
-                    if blk.endIsCap {
-                        // Re-dispatch at endPc as a fresh head.
-                        continue
-                    }
-                    // Block ended BEFORE a foreign instruction:
-                    // single-step it unless the budget just ran out.
-                    if stepsUsed < maxSteps && cpu.running {
-                        singleStep()
-                    }
-                case .singleStep:
-                    // Bail BEFORE the instruction at state.pc (the
-                    // signed DIV/REM overflow pair): delta excluded
-                    // it, so step() redoes its timer check + fetch.
-                    singleStep()
-                case .fault:
-                    stats.faultExits += 1
-                    // Rule J4: flush BEFORE handling the trap.
-                    flushCache(countStat: true)
-                    let trap = NovaTrap(rawValue: statePtr.pointee.exitAux) ?? .illegalInstruction
-                    cpu.jitHandleTrapAfterStep(trap)
-                    cpu.jitSetStats(stats)
-                case .timerLimit:
-                    stats.limitExits += 1
-                    cpu.memory.timerCount = interval
-                    stepsUsed &+= 1        // the firing pseudo-step (hotRun parity)
-                    flushCache(countStat: true)
-                    cpu.jitHandleTrapAfterStep(.timerInterrupt)
-                    cpu.jitSetStats(stats)
-                case .budgetLimit:
-                    stats.limitExits += 1
-                    finished = true         // running stays true: step-budget halt
-                case .invalidated:
-                    // STORL wrote into the cached-code interval
-                    // (rule J1): drop the whole cache and
-                    // re-dispatch at state.pc (already the next
-                    // instruction; the store completed).
-                    flushCache(countStat: true)
-                    cpu.jitSetStats(stats)
-                case .wfi:
-                    // Not produced by J2 blocks (WFI is foreign and
-                    // single-stepped); handled for contract totality.
-                    cpu.running = false
-                    finished = true
+            guard let d = dispatch else {
+                singleStep()
+                continue
+            }
+            let blk = d.blk
+            let delta = d.delta
+            stats.blockEntries += 1
+            stats.nativeInstructions += delta
+            stepsUsed &+= delta
+            // Settle the guest timer (design §5.3): every begun
+            // instruction (delta includes a faulting one, and
+            // excludes a bailed one) decremented the countdown once
+            // in step()'s check. delta <= timerAllow when armed, so
+            // this cannot underflow.
+            if armed {
+                cpu.memory.timerCount &-= delta
+            }
+            statePtr.pointee.syncOut(to: cpu)
+            cpu.jitSetStats(stats)
+
+            switch d.reason {
+            case .next:
+                if blk.endIsCap {
+                    // Re-dispatch at endPc as a fresh head.
+                    continue
                 }
+                // Block ended BEFORE a foreign instruction:
+                // single-step it unless the budget just ran out.
+                if stepsUsed < maxSteps && cpu.running {
+                    singleStep()
+                }
+            case .singleStep:
+                // Bail BEFORE the instruction at state.pc (the
+                // signed DIV/REM overflow pair): delta excluded it,
+                // so step() redoes its timer check + fetch.
+                singleStep()
+            case .fault:
+                stats.faultExits += 1
+                // Rule J4: flush BEFORE handling the trap.
+                flushCache(countStat: true)
+                let trap = NovaTrap(rawValue: statePtr.pointee.exitAux) ?? .illegalInstruction
+                cpu.jitHandleTrapAfterStep(trap)
+                cpu.jitSetStats(stats)
+            case .timerLimit:
+                stats.limitExits += 1
+                cpu.memory.timerCount = interval
+                stepsUsed &+= 1        // the firing pseudo-step (hotRun parity)
+                flushCache(countStat: true)
+                cpu.jitHandleTrapAfterStep(.timerInterrupt)
+                cpu.jitSetStats(stats)
+            case .budgetLimit:
+                stats.limitExits += 1
+                finished = true         // running stays true: step-budget halt
+            case .invalidated:
+                // STORL wrote into the cached-code interval (rule
+                // J1): drop the whole cache and re-dispatch at
+                // state.pc (already the next instruction; the store
+                // completed).
+                flushCache(countStat: true)
+                cpu.jitSetStats(stats)
+            case .wfi:
+                // Not produced by J2 blocks (WFI is foreign and
+                // single-stepped); handled for contract totality.
+                cpu.running = false
+                finished = true
             }
         }
         cpu.jitSetStats(stats)
