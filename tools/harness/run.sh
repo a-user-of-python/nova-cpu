@@ -365,6 +365,34 @@ FWPYEOF
           echo "--- interp console (first 400 bytes):"; head -c 400 "$fdir/interp.console" 2>/dev/null || true; echo
           echo "--- jit console (first 400 bytes):"; head -c 400 "$fdir/jit.console" 2>/dev/null || true; echo
         fi
+        # Smoke 2 (same scenario, NO --sandbox): with no file
+        # handler installed, file commands return -1 in
+        # NovaMemory itself and the interpreter's hotRun never
+        # re-enters a checked accessor from inside withHotBuffer
+        # (the exclusivity abort smoke 1 exposes in the shipped
+        # interpreter's file-MMIO path — see v071-j4.md §5). This
+        # variant isolates engine agreement on the boot + timer +
+        # keyboard + console paths. Shorter budget: boot + help
+        # complete in well under 1M cycles.
+        echo "== FIRMWARE SMOKE 2 (no sandbox, evidence only, not gated)"
+        "$BUILD_DIR/nova-harness-current" --firmware "$fdir/novash.bin" \
+            --timer-interval 100000 --input-hex 68656c700a --steps 4000000 \
+            --console-out "$fdir/interp2.console" --meta-out "$fdir/interp2.meta" \
+            >"$fdir/interp2.stdout" 2>"$fdir/interp2.stderr" || true
+        "$bbin" --firmware "$fdir/novash.bin" --engine jit \
+            --timer-interval 100000 --input-hex 68656c700a --steps 4000000 \
+            --console-out "$fdir/jit2.console" --meta-out "$fdir/jit2.meta" \
+            >"$fdir/jit2.stdout" 2>"$fdir/jit2.stderr" || true
+        echo "--- interp2 meta:"; cat "$fdir/interp2.meta" 2>/dev/null || true
+        echo "--- jit2 meta:"; cat "$fdir/jit2.meta" 2>/dev/null || true
+        if cmp -s "$fdir/interp2.console" "$fdir/jit2.console" \
+           && cmp -s <(grep -E '^(cycles|halt|pc)=' "$fdir/interp2.meta") <(grep -E '^(cycles|halt|pc)=' "$fdir/jit2.meta"); then
+          echo "FIRMWARE-SMOKE-2: engines AGREE (console + cycles + halt + pc identical)"
+        else
+          echo "FIRMWARE-SMOKE-2: engines DIFFER (see fw-smoke-out artifacts in build/)"
+          echo "--- interp2 console (first 400 bytes):"; head -c 400 "$fdir/interp2.console" 2>/dev/null || true; echo
+          echo "--- jit2 console (first 400 bytes):"; head -c 400 "$fdir/jit2.console" 2>/dev/null || true; echo
+        fi
       else
         echo "FIRMWARE-SMOKE: SKIPPED (could not extract firmware bytes)"
       fi
