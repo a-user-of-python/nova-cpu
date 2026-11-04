@@ -1,0 +1,61 @@
+name: NOVA JIT Spike (executable-memory feasibility)
+
+# Feasibility probe for NOVA v0.0.71 (Phase 2 JIT). Builds and runs
+# tools/jitspike/main.swift — a minimal Swift CLI that allocates
+# executable memory (plain RWX mmap, then an RW->RX mprotect W^X path,
+# then MAP_JIT), writes trivial native code into it and calls it.
+# Manual dispatch only: this is a one-shot probe, not a gate.
+# Canonical copy lives in tools/jitspike/jitspike.yml; this file is
+# copied verbatim into .github/workflows/jitspike.yml.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  jitspike:
+    name: JIT spike
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Show environment
+        run: |
+          uname -a
+          uname -m
+          swiftc --version
+          sysctl -n machdep.cpu.brand_string || true
+
+      - name: Build spike
+        run: swiftc -O -o /tmp/jitspike tools/jitspike/main.swift
+
+      - name: Show spike code signature / entitlements
+        run: |
+          codesign -dv /tmp/jitspike 2>&1 || true
+          echo "--- entitlements (empty = none) ---"
+          codesign -d --entitlements :- /tmp/jitspike 2>&1 || true
+
+      - name: Run spike
+        run: |
+          set +e
+          /tmp/jitspike 2>&1 | tee jitspike-run.log
+          rc=${PIPESTATUS[0]}
+          echo "SPIKE_EXIT_CODE=$rc"
+          # The spike's stdout IS the result (which allocation paths
+          # worked). A probe that ran and reported is a successful
+          # probe run even if every path failed or the process died
+          # executing generated code — only a build failure (above)
+          # fails this workflow.
+          exit 0
+
+      - name: Upload spike log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jitspike-log
+          path: jitspike-run.log
+          if-no-files-found: warn
