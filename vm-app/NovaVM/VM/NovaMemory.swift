@@ -39,6 +39,15 @@ final class NovaMemory {
 
     let totalSize: Int
     private let sizeU64: UInt64
+    /// Precomputed last valid start address for multi-byte accesses
+    /// (sizeU64 - 2 / - 4 / - 8). Lets each multi-byte accessor range-check
+    /// with ONE comparison (`addr <= maxStartN`) instead of the old
+    /// three-part guard; the two are exactly equivalent for these sizes
+    /// (proof in the accessor section comment below). totalSize is clamped
+    /// to >= 64 MB in init, so these subtractions can never underflow.
+    private let maxStart16: UInt64
+    private let maxStart32: UInt64
+    private let maxStart64: UInt64
     private var bytes: ContiguousArray<UInt8>
 
     let dataStackBase: UInt64
@@ -55,6 +64,9 @@ final class NovaMemory {
         let clamped = min(max(totalSize, 64 * 1024 * 1024), Self.maxTotalSize)
         self.totalSize = clamped
         self.sizeU64 = UInt64(clamped)
+        self.maxStart16 = UInt64(clamped) - 2
+        self.maxStart32 = UInt64(clamped) - 4
+        self.maxStart64 = UInt64(clamped) - 8
         self.bytes = ContiguousArray<UInt8>(repeating: 0, count: clamped)
 
         let top = UInt64(clamped)
@@ -67,69 +79,106 @@ final class NovaMemory {
     }
 
     // MARK: - Bounds-checked access (little-endian)
-
-    @inline(__always) private func checkRead(_ addr: UInt64, _ size: UInt64) throws {
-        // Wrapping add avoids overflow trap on addr+size; compare handles it.
-        guard addr < sizeU64, size <= sizeU64, addr &+ size <= sizeU64 else {
-            throw NovaTrap.loadAccessFault
-        }
-    }
-
-    @inline(__always) private func checkWrite(_ addr: UInt64, _ size: UInt64) throws {
-        guard addr < sizeU64, size <= sizeU64, addr &+ size <= sizeU64 else {
-            throw NovaTrap.storeAccessFault
-        }
-    }
+    //
+    // v0.0.70 fast path. Each accessor does ONE range check, then (for
+    // multi-byte accesses) a single constant-size memcpy of the value's
+    // bytes — under -O that lowers to one unaligned load/store — through a
+    // buffer pointer fetched fresh for this access (never stored across
+    // calls, so ContiguousArray growth/reallocation can never stale it).
+    //
+    // Why guest semantics are identical:
+    //  * Range check: for access size n in {2,4,8} and RAM size S
+    //    (S >= 64 MB by the init clamp, so S - n never underflows),
+    //      addr <= S - n   <=>   addr < S && addr + n <= S,
+    //    because addr + n cannot overflow in the passing case
+    //    (addr <= S <= 1 GB). That is exactly the old three-part guard
+    //    (addr < S, n <= S, addr &+ n <= S) for these sizes. read8/write8
+    //    keep the equivalent single comparison addr < S. An access faults
+    //    iff any of its bytes is out of bounds, exactly as before — this
+    //    covers accesses spanning the RAM/MMIO boundary and accesses
+    //    partially out of RAM. MMIO-page addresses (>= the console
+    //    address) fail this check just as they failed the old guard;
+    //    MMIO routing itself stays in NovaCPU, untouched.
+    //  * Atomicity: the check still runs BEFORE any byte is touched, so a
+    //    faulting access modifies nothing and a passing access transfers
+    //    all its bytes — same as the checked byte-wise code.
+    //  * Endianness: the original loops assemble/disassemble LSB-first
+    //    (byte at addr+0 is the least significant byte) — guest memory is
+    //    little-endian. Copying the host representation of a UInt16/32/64
+    //    preserves that order because every supported host (arm64 and
+    //    x86_64) is little-endian as well.
 
     @inline(__always) func read8(_ addr: UInt64) throws -> UInt8 {
-        try checkRead(addr, 1)
+        guard addr < sizeU64 else { throw NovaTrap.loadAccessFault }
         return bytes[Int(addr)]
     }
 
     @inline(__always) func read16(_ addr: UInt64) throws -> UInt16 {
-        try checkRead(addr, 2)
+        guard addr <= maxStart16 else { throw NovaTrap.loadAccessFault }
         let i = Int(addr)
-        return UInt16(bytes[i]) | (UInt16(bytes[i+1]) << 8)
+        var v: UInt16 = 0
+        bytes.withUnsafeBufferPointer { buf in
+            guard let base = buf.baseAddress else { return }
+            memcpy(&v, base + i, 2)
+        }
+        return v
     }
 
     @inline(__always) func read32(_ addr: UInt64) throws -> UInt32 {
-        try checkRead(addr, 4)
+        guard addr <= maxStart32 else { throw NovaTrap.loadAccessFault }
         let i = Int(addr)
-        // NOTE: must be UInt32 — UInt16 << 16 traps on overflow.
-        return UInt32(bytes[i]) | (UInt32(bytes[i+1]) << 8)
-             | (UInt32(bytes[i+2]) << 16) | (UInt32(bytes[i+3]) << 24)
+        var v: UInt32 = 0
+        bytes.withUnsafeBufferPointer { buf in
+            guard let base = buf.baseAddress else { return }
+            memcpy(&v, base + i, 4)
+        }
+        return v
     }
 
     @inline(__always) func read64(_ addr: UInt64) throws -> UInt64 {
-        try checkRead(addr, 8)
+        guard addr <= maxStart64 else { throw NovaTrap.loadAccessFault }
         let i = Int(addr)
         var v: UInt64 = 0
-        for b in 0..<8 { v |= UInt64(bytes[i+b]) << (b*8) }
+        bytes.withUnsafeBufferPointer { buf in
+            guard let base = buf.baseAddress else { return }
+            memcpy(&v, base + i, 8)
+        }
         return v
     }
 
     @inline(__always) func write8(_ addr: UInt64, _ v: UInt8) throws {
-        try checkWrite(addr, 1)
+        guard addr < sizeU64 else { throw NovaTrap.storeAccessFault }
         bytes[Int(addr)] = v
     }
 
     @inline(__always) func write16(_ addr: UInt64, _ v: UInt16) throws {
-        try checkWrite(addr, 2)
+        guard addr <= maxStart16 else { throw NovaTrap.storeAccessFault }
         let i = Int(addr)
-        bytes[i] = UInt8(v & 0xFF)
-        bytes[i+1] = UInt8((v >> 8) & 0xFF)
+        var tmp = v
+        bytes.withUnsafeMutableBufferPointer { buf in
+            guard let base = buf.baseAddress else { return }
+            memcpy(base + i, &tmp, 2)
+        }
     }
 
     @inline(__always) func write32(_ addr: UInt64, _ v: UInt32) throws {
-        try checkWrite(addr, 4)
+        guard addr <= maxStart32 else { throw NovaTrap.storeAccessFault }
         let i = Int(addr)
-        for b in 0..<4 { bytes[i+b] = UInt8((v >> (b*8)) & 0xFF) }
+        var tmp = v
+        bytes.withUnsafeMutableBufferPointer { buf in
+            guard let base = buf.baseAddress else { return }
+            memcpy(base + i, &tmp, 4)
+        }
     }
 
     @inline(__always) func write64(_ addr: UInt64, _ v: UInt64) throws {
-        try checkWrite(addr, 8)
+        guard addr <= maxStart64 else { throw NovaTrap.storeAccessFault }
         let i = Int(addr)
-        for b in 0..<8 { bytes[i+b] = UInt8((v >> (b*8)) & 0xFF) }
+        var tmp = v
+        bytes.withUnsafeMutableBufferPointer { buf in
+            guard let base = buf.baseAddress else { return }
+            memcpy(base + i, &tmp, 8)
+        }
     }
 
     func copyBytes(from src: UInt64, to dst: UInt64, count: UInt64) throws {
@@ -162,6 +211,74 @@ final class NovaMemory {
 
     func loadProgram(_ data: Data) throws {
         try loadBytes(data, at: 0)
+    }
+
+    // MARK: - Host bulk transfers (for the app lane's MMIO handlers)
+    //
+    // The file/net MMIO payload handlers live in NovaVMEngine.swift (and
+    // are mirrored in tools/harness/main.swift) — NOT in this file. They
+    // currently copy payloads byte-at-a-time via read8/write8 with try?.
+    // These helpers give them a single-memcpy path with IDENTICAL
+    // observable semantics to those byte loops:
+    //  * store: the byte loop writes each in-bounds byte and silently
+    //    ignores faults (try?), so the net effect is "the prefix of the
+    //    payload lying inside RAM is written, the rest dropped". Plain
+    //    write8 faults on MMIO-page addresses, so such bytes are dropped
+    //    here too — never routed to mmioWrite.
+    //  * load: the byte loop stops at the first faulting byte, so the
+    //    result is the in-RAM prefix starting at `addr` (empty when
+    //    `addr` is out of RAM) — a contiguous range, so clamping the
+    //    count to the end of RAM reproduces it exactly.
+    // Handlers that report the full REQUESTED byte count (as the current
+    // file/net handlers do) keep doing so from their own bookkeeping;
+    // the store helpers merely also return the count actually written.
+
+    /// Copies host bytes into guest RAM at `addr` with a single memcpy.
+    /// Returns the number of bytes actually written (the in-RAM prefix).
+    @discardableResult
+    func storeHostBytes(_ hostBytes: [UInt8], at addr: UInt64) -> Int {
+        guard addr < sizeU64, !hostBytes.isEmpty else { return 0 }
+        let n = min(hostBytes.count, Int(sizeU64 - addr))
+        hostBytes.withUnsafeBufferPointer { src in
+            guard let sp = src.baseAddress else { return }
+            bytes.withUnsafeMutableBufferPointer { dst in
+                guard let dp = dst.baseAddress else { return }
+                memcpy(dp + Int(addr), sp, n)
+            }
+        }
+        return n
+    }
+
+    /// Data overload of storeHostBytes(_:at:) — same semantics.
+    @discardableResult
+    func storeHostBytes(_ data: Data, at addr: UInt64) -> Int {
+        guard addr < sizeU64, !data.isEmpty else { return 0 }
+        let n = min(data.count, Int(sizeU64 - addr))
+        data.withUnsafeBytes { (src: UnsafeRawBufferPointer) in
+            guard let sp = src.baseAddress else { return }
+            bytes.withUnsafeMutableBufferPointer { dst in
+                guard let dp = dst.baseAddress else { return }
+                memcpy(dp + Int(addr), sp, n)
+            }
+        }
+        return n
+    }
+
+    /// Copies up to `count` guest bytes out of RAM at `addr` with a single
+    /// memcpy. Returns the in-RAM prefix (empty if `addr` is out of RAM
+    /// or `count` <= 0), matching the stop-at-first-fault byte loop.
+    func loadHostBytes(from addr: UInt64, count: Int) -> [UInt8] {
+        guard addr < sizeU64, count > 0 else { return [] }
+        let n = min(count, Int(sizeU64 - addr))
+        var out = [UInt8](repeating: 0, count: n)
+        out.withUnsafeMutableBufferPointer { dst in
+            guard let dp = dst.baseAddress else { return }
+            bytes.withUnsafeBufferPointer { src in
+                guard let sp = src.baseAddress else { return }
+                memcpy(dp, sp + Int(addr), n)
+            }
+        }
+        return out
     }
 
     // MARK: - Console I/O (memory-mapped)

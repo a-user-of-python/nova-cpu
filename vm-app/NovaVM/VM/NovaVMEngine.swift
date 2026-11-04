@@ -22,6 +22,40 @@ final class NovaVMEngine: ObservableObject {
     /// reboot while a program was running).
     private let runGroup = DispatchGroup()
 
+    // Console batching state. The guest console callback fires on the VM
+    // thread once per character; appending straight to the @Published
+    // consoleText cost one main-queue hop + one SwiftUI publish per char.
+    // Incoming text now accumulates in this lock-protected buffer (NOT
+    // @Published) and is flushed to consoleText in one append at most
+    // every consoleFlushInterval seconds, or sooner once the buffer
+    // reaches consoleFlushThreshold characters. Content and order are
+    // unchanged — only the publish granularity changes.
+    //
+    // Parameters are tuned for maximum main-thread relief (publish cost
+    // is dominated by the view's O(console-length) re-render per
+    // publish, so publish COUNT is the lever): the interval sits at the
+    // top of the sanctioned 50–100 ms band, capping trickle-output
+    // publishes at 10/s while shell echo still lands within 100 ms; the
+    // 16k threshold cuts flood publishes ~4x vs a few-KB threshold (a
+    // full 100k console ≈ 7 publishes), for ~16 KB of buffer memory.
+    // Neither parameter can affect the final text: the cap computation
+    // in flushConsoleBuffer is exact for any chunk size, and the tail
+    // flush on halt/stop/reset/load is a separate synchronous path.
+    private let consoleLock = NSLock()
+    private var consoleBuffer = ""
+    /// Character count of consoleBuffer, tracked incrementally so the
+    /// threshold check on the VM thread never pays String.count on the
+    /// whole buffer per incoming character.
+    private var consoleBufferCount = 0
+    /// True while any flush is already queued on the main queue.
+    private var consoleFlushPending = false
+    /// True while an immediate (threshold) flush is queued, so a flood
+    /// can't enqueue a redundant main-queue block per character while
+    /// the main thread is busy rendering the previous publish.
+    private var consoleFlushASAPPending = false
+    private static let consoleFlushInterval: TimeInterval = 0.1
+    private static let consoleFlushThreshold = 16384
+
     // Live configuration (from NOVA/config.nova)
     @Published var config: NovaConfig
 
@@ -82,6 +116,10 @@ final class NovaVMEngine: ObservableObject {
         // Trap handler: report and halt
         cpu.trapHandler = { [weak self] trap, tval in
             DispatchQueue.main.async {
+                // Flush first so the trap line lands after everything the
+                // guest printed before trapping (same order as the old
+                // per-character main-queue FIFO).
+                self?.flushConsoleBuffer()
                 self?.consoleText += "\n[TRAP \(trap) tval=0x\(String(tval, radix: 16))]\n"
                 self?.isRunning = false
                 self?.statusLine = "Trapped: \(trap)"
@@ -90,16 +128,106 @@ final class NovaVMEngine: ObservableObject {
             self?.cpu.running = false
         }
 
-        // Console output → published string (batched)
+        // Console output → batched buffer → published string.
+        // The callback fires on the VM thread; enqueueConsole only takes
+        // the lock and appends to the unpublished buffer. The @Published
+        // consoleText is touched on the main queue by flushConsoleBuffer.
         memory.consoleOutput = { [weak self] s in
-            DispatchQueue.main.async {
-                self?.consoleText += s
-                // Cap console at ~100k chars
-                if let t = self?.consoleText, t.count > 100_000 {
-                    self?.consoleText = String(t.suffix(90_000))
-                }
+            self?.enqueueConsole(s)
+        }
+    }
+
+    // MARK: - Console batching
+
+    /// Accumulate one guest output string (usually a single character)
+    /// from the VM thread. Schedules a main-queue flush if none is
+    /// pending (100 ms cadence), or flushes promptly once the buffer
+    /// reaches the size threshold.
+    private func enqueueConsole(_ s: String) {
+        consoleLock.lock()
+        consoleBuffer += s
+        consoleBufferCount += s.count
+        let overThreshold = consoleBufferCount >= Self.consoleFlushThreshold
+        var dispatchImmediate = false
+        var dispatchTimed = false
+        if overThreshold {
+            // Flush promptly, but coalesce: if an immediate flush is
+            // already queued it will drain everything buffered so far.
+            if !consoleFlushASAPPending {
+                consoleFlushASAPPending = true
+                consoleFlushPending = true
+                dispatchImmediate = true
+            }
+        } else if !consoleFlushPending {
+            consoleFlushPending = true
+            dispatchTimed = true
+        }
+        consoleLock.unlock()
+
+        if dispatchImmediate {
+            DispatchQueue.main.async { [weak self] in self?.flushConsoleBuffer() }
+        } else if dispatchTimed {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.consoleFlushInterval) { [weak self] in
+                self?.flushConsoleBuffer()
             }
         }
+    }
+
+    /// Publish everything buffered so far to consoleText in ONE append,
+    /// applying the console cap so the result is identical to the old
+    /// per-character path. Runs on the main queue; lifecycle methods
+    /// (stop / halt completion / trap / load) call this so no buffered
+    /// tail is ever lost or reordered.
+    private func flushConsoleBuffer() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.flushConsoleBuffer() }
+            return
+        }
+        consoleLock.lock()
+        let chunk = consoleBuffer
+        consoleBuffer = ""
+        consoleBufferCount = 0
+        consoleFlushPending = false
+        consoleFlushASAPPending = false
+        consoleLock.unlock()
+        guard !chunk.isEmpty else { return }
+        let existing = consoleText.count
+        consoleText += chunk
+        // Cap console at ~100k chars — same rule as the old per-character
+        // path (trim to a 90k suffix once the count exceeds 100k). The
+        // keep-count is computed with cappedConsoleLength so a chunk that
+        // crosses the cap mid-way lands on exactly the state the
+        // per-character appends would have produced.
+        if consoleText.count > 100_000 {
+            let keep = Self.cappedConsoleLength(existing: existing, appending: chunk.count)
+            consoleText = String(consoleText.suffix(keep))
+        }
+    }
+
+    /// Length a string of `existing` characters reaches after `appending`
+    /// more characters are added one at a time under the cap rule
+    /// "whenever the count exceeds 100_000, keep suffix(90_000)".
+    /// Pure length arithmetic — O(number of cap trims), no string copies.
+    private static func cappedConsoleLength(existing: Int, appending: Int) -> Int {
+        var len = existing
+        var remaining = appending
+        while remaining > 0 {
+            if len > 100_000 {
+                // Already over the cap (the trap line appends without a
+                // cap check): the next character trims back to 90_000.
+                len = 90_000
+                remaining -= 1
+            } else if len + remaining <= 100_000 {
+                len += remaining
+                remaining = 0
+            } else {
+                // Consume the characters that take the count to 100_001,
+                // which triggers the trim to 90_000, then keep going.
+                remaining -= (100_001 - len)
+                len = 90_000
+            }
+        }
+        return len
     }
 
     /// Writes to NOVA/launch.log in Documents (visible in Files app).
@@ -207,6 +335,10 @@ final class NovaVMEngine: ObservableObject {
         }
         resetCPUState()
         DispatchQueue.main.async {
+            // Flush then clear, atomically on the main queue: the old
+            // program's buffered tail can neither be lost mid-load nor
+            // land after the clear and resurrect stale text.
+            self.flushConsoleBuffer()
             self.consoleText = ""
             self.statusLine = "Program loaded (\(data.count) bytes)"
         }
@@ -261,9 +393,11 @@ final class NovaVMEngine: ObservableObject {
               box.error == nil,
               let data = box.data else { return -1 }
         let n = min(data.count, maxBytes)
-        for i in 0..<n {
-            try? memory.write8(bufAddr + UInt64(i), data[i])
-        }
+        // Bulk single-memcpy store (NovaMemory.storeHostBytes): moves
+        // exactly the n payload bytes, in-RAM prefix semantics identical
+        // to the old byte-at-a-time try? write8 loop. The handler still
+        // reports the requested count n, as before.
+        memory.storeHostBytes(data.prefix(n), at: bufAddr)
         return Int64(n)
     }
 
@@ -281,9 +415,7 @@ final class NovaVMEngine: ObservableObject {
             for name in names.sorted() {
                 let bytes = Array(name.utf8) + [0] // null-terminated
                 guard offset + bytes.count <= bufSize else { break }
-                for (i, b) in bytes.enumerated() {
-                    try? memory.write8(bufAddr + UInt64(offset + i), b)
-                }
+                memory.storeHostBytes(bytes, at: bufAddr + UInt64(offset))
                 offset += bytes.count
             }
             return Int64(offset)
@@ -305,9 +437,8 @@ final class NovaVMEngine: ObservableObject {
             let url = shared.appendingPathComponent(filename)
             guard let data = try? Data(contentsOf: url) else { return -1 }
             let n = min(data.count, bufSize)
-            for i in 0..<n {
-                try? memory.write8(bufAddr + UInt64(i), data[i])
-            }
+            // Bulk store, same semantics note as handleNetGet above.
+            memory.storeHostBytes(data.prefix(n), at: bufAddr)
             return Int64(n)
         case 3: // WRITE: arg0=path addr (null-term), arg1=buffer addr, arg2=byte count → bytes written or -1
             let pathAddr = arg0, bufAddr = arg1
@@ -323,12 +454,9 @@ final class NovaVMEngine: ObservableObject {
             }
             guard let filename = String(bytes: pathBytes, encoding: .utf8),
                   !filename.contains(".."), !filename.contains("/") else { return -1 }
-            var bytes = [UInt8]()
-            bytes.reserveCapacity(count)
-            for i in 0..<count {
-                guard let b = try? memory.read8(bufAddr + UInt64(i)) else { break }
-                bytes.append(b)
-            }
+            // Bulk single-memcpy load: returns the in-RAM prefix, exactly
+            // the bytes the old stop-at-first-fault read8 loop collected.
+            let bytes = memory.loadHostBytes(from: bufAddr, count: count)
             let url = shared.appendingPathComponent(filename)
             do {
                 try Data(bytes).write(to: url, options: .atomic)
@@ -376,6 +504,10 @@ final class NovaVMEngine: ObservableObject {
                 // Only update UI if this is still the current generation.
                 // Prevents a stale thread from overwriting state after reboot.
                 guard let self = self, self.runGeneration == gen else { return }
+                // Tail flush: cpu.run() has returned, so every character
+                // the guest printed is already in the buffer — publish it
+                // before reporting the halt.
+                self.flushConsoleBuffer()
                 self.isRunning = false
                 self.statusLine = "Halted"
                 self.snapshotRegisters()
@@ -392,6 +524,11 @@ final class NovaVMEngine: ObservableObject {
         // CPU/memory state. Prevents reboot races.
         _ = runGroup.wait(timeout: .now() + 2.0)
         runThread = nil
+        // The VM thread has exited (or timed out), so the buffer holds
+        // the complete tail — flush it so nothing the guest printed is
+        // lost. reset()/reboot()/boot() all pass through stop() first,
+        // so they inherit this flush before they clear the console.
+        flushConsoleBuffer()
         isRunning = false
         statusLine = "Stopped"
         snapshotRegisters()

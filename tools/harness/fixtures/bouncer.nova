@@ -1,0 +1,148 @@
+; bouncer.nova — ASCII bouncing ball with colors!
+; Test program for the NovaShell scheduler.
+; A ball bounces left and right across the screen.
+
+main:
+    PUSH64 0xFFFFFFFFFFFF0000
+    POPR 0                     ; R0 = console MMIO
+
+    PUSH8 0
+    POPR 1                     ; R1 = position (0-39)
+    PUSH8 1
+    POPR 2                     ; R2 = direction (1=right, 0=left)
+
+loop:
+    ; Print carriage return (go to start of line)
+    PUSH8 13
+    PUSHR 0
+    STORE8
+
+    ; Print spaces up to position
+    PUSH8 0
+    POPR 3                     ; R3 = i = 0
+space_loop:
+    PUSHR 3
+    PUSHR 1
+    EQ
+    BNZ print_ball
+    PUSH8 32                   ; ' '
+    PUSHR 0
+    STORE8
+    PUSHR 3
+    PUSH8 1
+    ADD
+    POPR 3
+    JMP space_loop
+
+print_ball:
+    ; Print ball with color (cyan)
+    ; ESC[36m = cyan, ESC[0m = reset
+    PUSH8 27
+    PUSHR 0
+    STORE8
+    PUSH8 91                   ; '['
+    PUSHR 0
+    STORE8
+    PUSH8 51                   ; '3'
+    PUSHR 0
+    STORE8
+    PUSH8 54                   ; '6'
+    PUSHR 0
+    STORE8
+    PUSH8 109                  ; 'm'
+    PUSHR 0
+    STORE8
+
+    PUSH8 79                   ; 'O' (the ball!)
+    PUSHR 0
+    STORE8
+
+    PUSH8 27
+    PUSHR 0
+    STORE8
+    PUSH8 91
+    PUSHR 0
+    STORE8
+    PUSH8 48                   ; '0'
+    PUSHR 0
+    STORE8
+    PUSH8 109                  ; 'm'
+    PUSHR 0
+    STORE8
+
+    ; Print " BOUNCER"
+    PUSH8 32
+    PUSHR 0
+    STORE8
+    PUSH8 66                   ; 'B'
+    PUSHR 0
+    STORE8
+    PUSH8 79
+    PUSHR 0
+    STORE8
+    PUSH8 85
+    PUSHR 0
+    STORE8
+    PUSH8 78
+    PUSHR 0
+    STORE8
+    PUSH8 67
+    PUSHR 0
+    STORE8
+    PUSH8 69
+    PUSHR 0
+    STORE8
+    PUSH8 82
+    PUSHR 0
+    STORE8
+
+    ; Update position
+    PUSHR 2
+    PUSH8 1
+    EQ
+    BNZ move_right
+    ; move left
+    PUSHR 1
+    PUSH8 1
+    SUB
+    POPR 1
+    PUSHR 1
+    PUSH8 0
+    EQ
+    BNZ flip_right
+    JMP delay
+
+move_right:
+    PUSHR 1
+    PUSH8 1
+    ADD
+    POPR 1
+    PUSHR 1
+    PUSH8 39
+    EQ
+    BNZ flip_left
+    JMP delay
+
+flip_right:
+    PUSH8 1
+    POPR 2
+    JMP delay
+
+flip_left:
+    PUSH8 0
+    POPR 2
+
+delay:
+    PUSH64 1000000
+    POPR 3
+delay_loop:
+    PUSHR 3
+    PUSH8 1
+    SUB
+    POPR 3
+    PUSHR 3
+    PUSH8 0
+    EQ
+    BZ delay_loop
+
+    JMP loop

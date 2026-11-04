@@ -1,0 +1,20 @@
+; hi.nova — minimal test: prints "HI" and halts.
+; If this works, run is fine. If not, run is broken.
+
+main:
+    PUSH64 0xFFFFFFFFFFFF0000
+    POPR 0                     ; R0 = console
+
+    PUSH8 72                   ; 'H'
+    PUSHR 0
+    STORE8
+
+    PUSH8 73                   ; 'I'
+    PUSHR 0
+    STORE8
+
+    PUSH8 10                   ; newline
+    PUSHR 0
+    STORE8
+
+    WFI

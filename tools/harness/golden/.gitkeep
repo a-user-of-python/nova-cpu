@@ -1,0 +1,3 @@
+Golden files (<program>.console / .cycles / .halt) are generated here by
+`run.sh baseline` on the CI runner and committed. This placeholder keeps the
+directory present before the first baseline run.

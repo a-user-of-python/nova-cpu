@@ -1,0 +1,91 @@
+; galaxy_fixed.nova — simple working version that prints GALAXY art.
+; The Python generator is broken (uses unpatched placeholders).
+
+main:
+    PUSH64 0xFFFFFFFFFFFF0000
+    POPR 0                     ; R0 = console
+
+    ; Print "  ____       _       _    __  __\n"
+    ; (Simple ASCII art, not the complex spiral)
+
+    PUSH8 32
+    PUSHR 0
+    STORE8
+    PUSH8 32
+    PUSHR 0
+    STORE8
+    PUSH8 95                   ; '_'
+    PUSHR 0
+    STORE8
+    PUSH8 95
+    PUSHR 0
+    STORE8
+    PUSH8 95
+    PUSHR 0
+    STORE8
+    PUSH8 95
+    PUSHR 0
+    STORE8
+    PUSH8 10
+    PUSHR 0
+    STORE8
+
+    PUSH8 71                   ; 'G'
+    PUSHR 0
+    STORE8
+    PUSH8 65                   ; 'A'
+    PUSHR 0
+    STORE8
+    PUSH8 76                   ; 'L'
+    PUSHR 0
+    STORE8
+    PUSH8 65
+    PUSHR 0
+    STORE8
+    PUSH8 88                   ; 'X'
+    PUSHR 0
+    STORE8
+    PUSH8 89                   ; 'Y'
+    PUSHR 0
+    STORE8
+    PUSH8 10
+    PUSHR 0
+    STORE8
+
+    PUSH8 10
+    PUSHR 0
+    STORE8
+
+    ; Print "user@nova"
+    PUSH8 117                  ; 'u'
+    PUSHR 0
+    STORE8
+    PUSH8 115                  ; 's'
+    PUSHR 0
+    STORE8
+    PUSH8 101                  ; 'e'
+    PUSHR 0
+    STORE8
+    PUSH8 114                  ; 'r'
+    PUSHR 0
+    STORE8
+    PUSH8 64                   ; '@'
+    PUSHR 0
+    STORE8
+    PUSH8 110                  ; 'n'
+    PUSHR 0
+    STORE8
+    PUSH8 111                  ; 'o'
+    PUSHR 0
+    STORE8
+    PUSH8 118                  ; 'v'
+    PUSHR 0
+    STORE8
+    PUSH8 97                   ; 'a'
+    PUSHR 0
+    STORE8
+    PUSH8 10
+    PUSHR 0
+    STORE8
+
+    WFI

@@ -1,0 +1,115 @@
+; counter.nova — prints a spinning indicator forever.
+; Test program for the NovaShell scheduler.
+; Shows the program is alive and making progress.
+
+main:
+    PUSH64 0xFFFFFFFFFFFF0000
+    POPR 0                     ; R0 = console MMIO
+
+    PUSH8 0
+    POPR 1                     ; R1 = spinner index (0-3)
+
+loop:
+    ; Print '['
+    PUSH8 91                   ; '['
+    PUSHR 0
+    STORE8
+
+    ; Print spinner char based on R1
+    ; R1=0: '|', R1=1: '/', R1=2: '-', R1=3: '\'
+    PUSHR 1
+    PUSH8 0
+    EQ
+    BNZ print_pipe
+    PUSHR 1
+    PUSH8 1
+    EQ
+    BNZ print_slash
+    PUSHR 1
+    PUSH8 2
+    EQ
+    BNZ print_dash
+    ; else: backslash
+    PUSH8 92                   ; '\'
+    JMP do_print
+
+print_pipe:
+    PUSH8 124                  ; '|'
+    JMP do_print
+print_slash:
+    PUSH8 47                   ; '/'
+    JMP do_print
+print_dash:
+    PUSH8 45                   ; '-'
+    ; fall through
+
+do_print:
+    PUSHR 0
+    STORE8
+
+    ; Print ']'
+    PUSH8 93                   ; ']'
+    PUSHR 0
+    STORE8
+
+    ; Print " COUNTER"
+    PUSH8 32
+    PUSHR 0
+    STORE8
+    PUSH8 67                   ; 'C'
+    PUSHR 0
+    STORE8
+    PUSH8 79                   ; 'O'
+    PUSHR 0
+    STORE8
+    PUSH8 85                   ; 'U'
+    PUSHR 0
+    STORE8
+    PUSH8 78                   ; 'N'
+    PUSHR 0
+    STORE8
+    PUSH8 84                   ; 'T'
+    PUSHR 0
+    STORE8
+    PUSH8 69                   ; 'E'
+    PUSHR 0
+    STORE8
+    PUSH8 82                   ; 'R'
+    PUSHR 0
+    STORE8
+
+    ; Print newline
+    PUSH8 10
+    PUSHR 0
+    STORE8
+
+    ; Increment spinner index (0->1->2->3->0)
+    PUSHR 1
+    PUSH8 1
+    ADD
+    POPR 1
+    PUSHR 1
+    PUSH8 4
+    EQ
+    BNZ reset_idx
+    JMP delay
+
+reset_idx:
+    PUSH8 0
+    POPR 1
+
+delay:
+    ; Busy-wait delay
+    PUSH64 2000000
+    POPR 2
+delay_loop:
+    PUSHR 2
+    PUSH8 1
+    SUB
+    POPR 2
+    PUSHR 2
+    PUSH8 0
+    EQ
+    BZ delay_loop
+
+    JMP loop
