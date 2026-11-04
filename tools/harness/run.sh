@@ -64,7 +64,7 @@ prepare_bins() {
   # produce them — assembling the template yields a binary that faults on
   # its first byte. The canonical artifacts are the generator-produced .bins,
   # staged verbatim. See README.md.
-  cp "$ROOT/examples/galaxy.bin" "$BIN_DIR/galaxy_examples.bin" || return 1
+  cp "$FIX_DIR/examples_galaxy.bin" "$BIN_DIR/galaxy_examples.bin" || return 1
   cp "$FIX_DIR/galaxy.bin"       "$BIN_DIR/galaxy.bin"          || return 1
 }
 
