@@ -7,6 +7,13 @@
 
 import Foundation
 
+// ============================================================================
+// HARNESS VARIANT MEMORY — identical to vm-app/NovaVM/VM/NovaMemory.swift
+// (V1) except for ONE added method, withHotBuffer (see its comment), which
+// the variant CPU's hot loop uses for direct buffer access. Nothing else
+// differs; trap kinds, ranges and MMIO behaviour are V1's, byte for byte.
+// ============================================================================
+
 // MARK: - Trap Causes (shared by CPU and memory)
 enum NovaTrap: UInt64, Error {
     case instrAddrMisaligned = 0
@@ -279,6 +286,38 @@ final class NovaMemory {
             }
         }
         return out
+    }
+
+    // MARK: - Hot-loop buffer access (harness-variant support)
+    //
+    // Added for the tools/harness variants (hotloop/dispatch); NOT part
+    // of the V1 shipping core. Runs `body` with a mutable pointer to
+    // the guest RAM buffer. The pointer is valid ONLY for the duration
+    // of the call and must not escape it.
+    //
+    // Why handing out the buffer for a whole interpreter run is safe
+    // here: `bytes` is assigned exactly once, in init, and NO code path
+    // in this file ever resizes, appends to, removes from, or
+    // reassigns it afterwards — every mutation is an in-place subscript
+    // store or a memcpy/memmove through a buffer pointer (grep this
+    // file for `bytes` to re-verify). The storage therefore cannot
+    // move while `body` runs. The CPU side is single-threaded (the
+    // engine runs the VM on one thread). Host MMIO handlers invoked
+    // from inside `body` use the ordinary checked accessors; they
+    // mutate the same fixed storage in place, which is compatible
+    // with the outstanding pointer for the same no-resize reason.
+    //
+    // This accessor performs NO bounds checking: the caller (the
+    // variant CPU's hot loop) reproduces each checked accessor's range
+    // comparison itself before touching the buffer, which is what
+    // keeps its fault behaviour identical to the checked accessors.
+    func withHotBuffer<T>(_ body: (UnsafeMutablePointer<UInt8>) -> T) -> T {
+        return bytes.withUnsafeMutableBufferPointer { buf in
+            guard let base = buf.baseAddress else {
+                preconditionFailure("NovaMemory: guest RAM buffer is empty")
+            }
+            return body(base)
+        }
     }
 
     // MARK: - Console I/O (memory-mapped)
