@@ -11,7 +11,6 @@
 		3886B7000F3BFF1552116492 /* NovaVMApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EEC3EED87A9FD58C6DA4CB8 /* NovaVMApp.swift */; };
 		20C0AEC545141B4D03071606 /* NovaCPU.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD815AFB60ADD587BCCE4E2A /* NovaCPU.swift */; };
 		E4C19325F56D4637FB35EC98 /* NovaMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8271DF7CD81E70420B883491 /* NovaMemory.swift */; };
-		A303404970E3C9F495E81521 /* NovaJIT.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC5EC9C5F49D56DE214530C0 /* NovaJIT.swift */; };
 		94C4525BC721AAA0224EE8B2 /* NovaFirmware.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85BBAB6853269926CC6531A8 /* NovaFirmware.swift */; };
 		D00DE84F7B25C0E67479F283 /* NovaVMEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91A148C0ADC276D966184D92 /* NovaVMEngine.swift */; };
 		9678A5FD7888AD50510ECAC5 /* NovaConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 841C33FB64A21B15DC60786C /* NovaConfig.swift */; };
@@ -31,7 +30,6 @@ A30000000000000000000001 /* NovaVM.app */ = {isa = PBXFileReference; explicitFil
 		6EEC3EED87A9FD58C6DA4CB8 /* NovaVMApp.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NovaVMApp.swift; sourceTree = "<group>"; };
 		DD815AFB60ADD587BCCE4E2A /* NovaCPU.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/NovaCPU.swift; sourceTree = "<group>"; };
 		8271DF7CD81E70420B883491 /* NovaMemory.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/NovaMemory.swift; sourceTree = "<group>"; };
-		DC5EC9C5F49D56DE214530C0 /* NovaJIT.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/NovaJIT.swift; sourceTree = "<group>"; };
 		85BBAB6853269926CC6531A8 /* NovaFirmware.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/NovaFirmware.swift; sourceTree = "<group>"; };
 		91A148C0ADC276D966184D92 /* NovaVMEngine.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/NovaVMEngine.swift; sourceTree = "<group>"; };
 		841C33FB64A21B15DC60786C /* NovaConfig.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VM/NovaConfig.swift; sourceTree = "<group>"; };
@@ -86,7 +84,6 @@ A30000000000000000000001 /* NovaVM.app */ = {isa = PBXFileReference; explicitFil
 				6EEC3EED87A9FD58C6DA4CB8 /* NovaVMApp.swift */,
 				DD815AFB60ADD587BCCE4E2A /* NovaCPU.swift */,
 				8271DF7CD81E70420B883491 /* NovaMemory.swift */,
-				DC5EC9C5F49D56DE214530C0 /* NovaJIT.swift */,
 				85BBAB6853269926CC6531A8 /* NovaFirmware.swift */,
 				91A148C0ADC276D966184D92 /* NovaVMEngine.swift */,
 				841C33FB64A21B15DC60786C /* NovaConfig.swift */,
@@ -192,7 +189,6 @@ A30000000000000000000001 /* NovaVM.app */ = {isa = PBXFileReference; explicitFil
 				3886B7000F3BFF1552116492 /* NovaVMApp.swift in Sources */,
 				20C0AEC545141B4D03071606 /* NovaCPU.swift in Sources */,
 				E4C19325F56D4637FB35EC98 /* NovaMemory.swift in Sources */,
-				A303404970E3C9F495E81521 /* NovaJIT.swift in Sources */,
 				94C4525BC721AAA0224EE8B2 /* NovaFirmware.swift in Sources */,
 				D00DE84F7B25C0E67479F283 /* NovaVMEngine.swift in Sources */,
 				9678A5FD7888AD50510ECAC5 /* NovaConfig.swift in Sources */,
@@ -343,7 +339,7 @@ A30000000000000000000001 /* NovaVM.app */ = {isa = PBXFileReference; explicitFil
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.0.72;
+				MARKETING_VERSION = 0.0.73;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -380,7 +376,7 @@ A30000000000000000000001 /* NovaVM.app */ = {isa = PBXFileReference; explicitFil
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.0.72;
+				MARKETING_VERSION = 0.0.73;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.nova.vm;

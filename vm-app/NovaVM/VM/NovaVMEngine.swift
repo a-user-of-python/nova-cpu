@@ -97,10 +97,6 @@ final class NovaVMEngine: ObservableObject {
         self.memory = NovaMemory(totalSize: ramBytes)
         Self.logLaunch("memory ok")
         cpu.memory = memory
-        // v0.0.71: ask for the JIT engine. The CPU probes at each
-        // run() entry and silently falls back to the interpreter
-        // when JIT is unavailable — no error surface for fallback.
-        cpu.requestedEngine = .jit
 
         // Wire up file MMIO handler for firmware (NovaShell)
         memory.fileHandler = { [weak self] cmd, arg0, arg1, arg2 in
@@ -513,7 +509,7 @@ final class NovaVMEngine: ObservableObject {
                 // before reporting the halt.
                 self.flushConsoleBuffer()
                 self.isRunning = false
-                self.statusLine = "Halted — \(self.cpu.activeEngine.label)"
+                self.statusLine = "Halted — Interpreter"
                 self.snapshotRegisters()
             }
         }
