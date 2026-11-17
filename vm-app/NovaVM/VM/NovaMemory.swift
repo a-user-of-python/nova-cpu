@@ -57,6 +57,29 @@ final class NovaMemory {
     private let maxStart64: UInt64
     private var bytes: ContiguousArray<UInt8>
 
+    /// Base pointer of the `bytes` storage, captured once in init.
+    /// `bytes` is assigned exactly once (init) and never resized,
+    /// appended to, or reassigned afterwards — every mutation is an
+    /// in-place subscript store or a memcpy/memmove through a buffer
+    /// pointer (the same invariant withHotBuffer's comment documents) —
+    /// so this pointer stays valid for the life of the instance.
+    ///
+    /// It exists for the host MMIO helpers below (storeHostBytes /
+    /// loadHostBytes / hostReadCString). The file/net handlers run
+    /// synchronously inside `mmioWrite`, which the interpreter's hot
+    /// loop calls from inside `withHotBuffer` — a modify access on
+    /// `bytes` held for the whole run. Any checked accessor a handler
+    /// called would begin a second access on `bytes`, and the process
+    /// dies with a Swift exclusivity violation ("Simultaneous
+    /// accesses … but modification requires exclusive access") — the
+    /// v0.0.70 file-MMIO bug, live-fired by NovaShell's boot-time
+    /// load_config the moment the Run tab boots. The host helpers
+    /// touch RAM only through this pointer, beginning no Swift access
+    /// on `bytes` at all; the bytes land in the same fixed storage the
+    /// hot loop's own pointer views, so guest-visible behaviour is
+    /// unchanged.
+    private var ramBase: UnsafeMutablePointer<UInt8>!
+
     let dataStackBase: UInt64
     let callStackBase: UInt64
     let vectorStackBase: UInt64
@@ -83,6 +106,14 @@ final class NovaMemory {
         self.vectorStackBase = top
         self.callStackBase   = top &- reserveUnit
         self.dataStackBase   = top &- (reserveUnit * 2)
+
+        // Capture the RAM base pointer for the host MMIO helpers (see
+        // the ramBase declaration for why this is safe and necessary).
+        // Last in init: the closure assigns a self property, which
+        // Swift only allows once every stored property is initialized.
+        bytes.withUnsafeMutableBufferPointer { buf in
+            ramBase = buf.baseAddress
+        }
     }
 
     // MARK: - Bounds-checked access (little-endian)
@@ -239,6 +270,15 @@ final class NovaMemory {
     // Handlers that report the full REQUESTED byte count (as the current
     // file/net handlers do) keep doing so from their own bookkeeping;
     // the store helpers merely also return the count actually written.
+    //
+    // v0.0.74: the copies run through `ramBase`, NOT through a buffer
+    // pointer fetched from `bytes`. Handlers execute inside the hot
+    // loop's withHotBuffer modify access on `bytes`; fetching a buffer
+    // pointer here began a nested access and aborted the process with
+    // a Swift exclusivity violation on the first file/net command
+    // (NovaShell issues one during boot, so the Run tab died on tap).
+    // ramBase points at the same fixed storage, so every byte lands
+    // exactly where the old path put it.
 
     /// Copies host bytes into guest RAM at `addr` with a single memcpy.
     /// Returns the number of bytes actually written (the in-RAM prefix).
@@ -248,10 +288,7 @@ final class NovaMemory {
         let n = min(hostBytes.count, Int(sizeU64 - addr))
         hostBytes.withUnsafeBufferPointer { src in
             guard let sp = src.baseAddress else { return }
-            bytes.withUnsafeMutableBufferPointer { dst in
-                guard let dp = dst.baseAddress else { return }
-                memcpy(dp + Int(addr), sp, n)
-            }
+            memcpy(ramBase + Int(addr), sp, n)
         }
         return n
     }
@@ -263,10 +300,7 @@ final class NovaMemory {
         let n = min(data.count, Int(sizeU64 - addr))
         data.withUnsafeBytes { (src: UnsafeRawBufferPointer) in
             guard let sp = src.baseAddress else { return }
-            bytes.withUnsafeMutableBufferPointer { dst in
-                guard let dp = dst.baseAddress else { return }
-                memcpy(dp + Int(addr), sp, n)
-            }
+            memcpy(ramBase + Int(addr), sp, n)
         }
         return n
     }
@@ -280,12 +314,24 @@ final class NovaMemory {
         var out = [UInt8](repeating: 0, count: n)
         out.withUnsafeMutableBufferPointer { dst in
             guard let dp = dst.baseAddress else { return }
-            bytes.withUnsafeBufferPointer { src in
-                guard let sp = src.baseAddress else { return }
-                memcpy(dp, sp + Int(addr), n)
-            }
+            memcpy(dp, ramBase + Int(addr), n)
         }
         return out
+    }
+
+    /// Reads a NUL-terminated guest string for a host MMIO handler:
+    /// the bytes from `addr` up to (not including) the first NUL,
+    /// stopping early at the end of RAM or after `maxLength` bytes.
+    /// Byte-for-byte what the handlers' old `try? read8` loops
+    /// collected — read8 inside a handler aborted the process for the
+    /// same exclusivity reason as the bulk helpers above, so the
+    /// string reads go through loadHostBytes too.
+    func hostReadCString(from addr: UInt64, maxLength: Int) -> [UInt8] {
+        let raw = loadHostBytes(from: addr, count: maxLength)
+        if let end = raw.firstIndex(of: 0) {
+            return Array(raw[..<end])
+        }
+        return raw
     }
 
     // MARK: - Hot-loop buffer access (harness-variant support)
