@@ -358,15 +358,11 @@ final class NovaVMEngine: ObservableObject {
     /// Network "hardware": blocking HTTP GET for the firmware's MMIO network device.
     /// Runs on the VM thread (like a syscall). Only http/https URLs are allowed.
     private func handleNetGet(urlAddr: UInt64, bufAddr: UInt64, bufSize: UInt64, cmd: UInt64) -> Int64 {
-        // Read NUL-terminated URL from guest memory
-        var urlBytes: [UInt8] = []
-        var p = urlAddr
-        for _ in 0..<2048 { // max URL length
-            guard let b = try? memory.read8(p) else { break }
-            if b == 0 { break }
-            urlBytes.append(b)
-            p += 1
-        }
+        // Read NUL-terminated URL from guest memory. Via hostReadCString,
+        // NOT read8: this handler runs inside the interpreter hot loop's
+        // modify access on guest RAM, where a checked accessor aborts the
+        // process (Swift exclusivity — the v0.0.74 fix; see NovaMemory).
+        let urlBytes = memory.hostReadCString(from: urlAddr, maxLength: 2048)
         guard let urlStr = String(bytes: urlBytes, encoding: .utf8),
               let url = URL(string: urlStr),
               let scheme = url.scheme?.lowercased(),
@@ -423,15 +419,9 @@ final class NovaVMEngine: ObservableObject {
             let pathAddr = arg0, bufAddr = arg1
             let bufSize = Int(min(arg2, 10_000_000)) // clamp to 10MB max
             guard bufSize > 0 else { return 0 }
-            // Read null-terminated path from guest memory
-            var pathBytes: [UInt8] = []
-            var p = pathAddr
-            for _ in 0..<256 { // max path len
-                guard let b = try? memory.read8(p) else { break }
-                if b == 0 { break }
-                pathBytes.append(b)
-                p += 1
-            }
+            // Read null-terminated path from guest memory (hostReadCString —
+            // read8 here would abort inside the hot loop; see handleNetGet).
+            let pathBytes = memory.hostReadCString(from: pathAddr, maxLength: 256)
             guard let filename = String(bytes: pathBytes, encoding: .utf8),
                   !filename.contains(".."), !filename.contains("/") else { return -1 }
             let url = shared.appendingPathComponent(filename)
@@ -444,14 +434,8 @@ final class NovaVMEngine: ObservableObject {
             let pathAddr = arg0, bufAddr = arg1
             let count = Int(min(arg2, 10_000_000))
             guard count >= 0 else { return -1 }
-            var pathBytes: [UInt8] = []
-            var p = pathAddr
-            for _ in 0..<256 {
-                guard let b = try? memory.read8(p) else { break }
-                if b == 0 { break }
-                pathBytes.append(b)
-                p += 1
-            }
+            // Path read via hostReadCString — see the READ case above.
+            let pathBytes = memory.hostReadCString(from: pathAddr, maxLength: 256)
             guard let filename = String(bytes: pathBytes, encoding: .utf8),
                   !filename.contains(".."), !filename.contains("/") else { return -1 }
             // Bulk single-memcpy load: returns the in-RAM prefix, exactly
