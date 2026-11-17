@@ -233,6 +233,45 @@ cmd_gate() {
     printf '%-18s %-10s %s\n' "$name" "$status" "$detail"
     [ "$status" = "FAIL" ] && fail=1
   done
+  # Sandbox shell-boot check (v0.0.74): boot the app's embedded
+  # NovaShell firmware WITH a file sandbox attached and a scripted
+  # `help` line. NovaShell issues file commands during boot
+  # (load_config reads — and creates — novash.cfg), which is exactly
+  # the path that aborted with a Swift exclusivity violation in the
+  # shipped interpreter: hotRun executes inside withHotBuffer (a
+  # modify access on NovaMemory.bytes) and the host handlers used to
+  # re-enter the checked accessors on the same storage. The golden
+  # cases above never install a file handler, so they cannot see
+  # this. PASS requires: clean exit, the banner and the help listing
+  # in the console, and novash.cfg created in the sandbox (proof the
+  # boot-time file WRITE handler ran inside the hot loop).
+  local sbx="$out/shellboot" sb_status="PASS" sb_detail=""
+  rm -rf "$sbx"; mkdir -p "$sbx/sandbox"
+  if ! python3 - "$ROOT/vm-app/NovaVM/VM/NovaFirmware.swift" "$sbx/novash.bin" <<'FWPYEOF'
+import re, sys
+src = open(sys.argv[1]).read()
+m = re.search(r"novaShellBytes[^=]*=\s*\[(.*?)\n\]", src, re.S)
+if not m:
+    sys.exit(1)
+vals = re.findall(r"0x[0-9a-fA-F]+", m.group(1))
+open(sys.argv[2], "wb").write(bytes(int(v, 16) for v in vals))
+print(f"extracted {len(vals)} firmware bytes")
+FWPYEOF
+  then
+    sb_status="FAIL"; sb_detail="firmware extraction failed"
+  elif ! "$BUILD_DIR/nova-harness-current" --firmware "$sbx/novash.bin" \
+        --timer-interval 100000 --input-hex 68656c700a --steps 20000000 \
+        --sandbox "$sbx/sandbox" \
+        --console-out "$sbx/console" --meta-out "$sbx/meta" \
+        >"$sbx/stdout" 2>"$sbx/stderr"; then
+    sb_status="FAIL"; sb_detail="harness run failed/aborted (see $sbx/stderr)"
+  else
+    grep -q "NOVA firmware shell" "$sbx/console" || { sb_status="FAIL"; sb_detail="banner missing"; }
+    grep -q "list shared folder" "$sbx/console" || { sb_status="FAIL"; sb_detail="${sb_detail:+$sb_detail; }help listing missing"; }
+    [ -f "$sbx/sandbox/novash.cfg" ] || { sb_status="FAIL"; sb_detail="${sb_detail:+$sb_detail; }novash.cfg not created in sandbox"; }
+  fi
+  printf '%-18s %-10s %s\n' "shellboot+sandbox" "$sb_status" "$sb_detail"
+  [ "$sb_status" = "FAIL" ] && fail=1
   if [ $fail -eq 0 ]; then echo "== GATE: all programs match the golden baseline"; else echo "== GATE: MISMATCHES FOUND"; fi
   return $fail
 }
