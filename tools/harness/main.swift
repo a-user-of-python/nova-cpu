@@ -182,9 +182,7 @@ if let sandbox = sandboxPath {
             for name in names.sorted() {
                 let bytes = Array(name.utf8) + [0]
                 guard offset + bytes.count <= bufSize else { break }
-                for (k, b) in bytes.enumerated() {
-                    try? memory.write8(bufAddr + UInt64(offset + k), b)
-                }
+                memory.storeHostBytes(bytes, at: bufAddr + UInt64(offset))
                 offset += bytes.count
             }
             return Int64(offset)
@@ -192,43 +190,22 @@ if let sandbox = sandboxPath {
             let pathAddr = arg0, bufAddr = arg1
             let bufSize = Int(min(arg2, 10_000_000))
             guard bufSize > 0 else { return 0 }
-            var pathBytes: [UInt8] = []
-            var p = pathAddr
-            for _ in 0..<256 {
-                guard let b = try? memory.read8(p) else { break }
-                if b == 0 { break }
-                pathBytes.append(b)
-                p += 1
-            }
+            let pathBytes = memory.hostReadCString(from: pathAddr, maxLength: 256)
             guard let filename = String(bytes: pathBytes, encoding: .utf8),
                   !filename.contains(".."), !filename.contains("/") else { return -1 }
             let url = sharedDir.appendingPathComponent(filename)
             guard let data = try? Data(contentsOf: url) else { return -1 }
             let n = min(data.count, bufSize)
-            for k in 0..<n {
-                try? memory.write8(bufAddr + UInt64(k), data[k])
-            }
+            memory.storeHostBytes(data.prefix(n), at: bufAddr)
             return Int64(n)
         case 3: // WRITE: arg0=path addr, arg1=buffer addr, arg2=byte count
             let pathAddr = arg0, bufAddr = arg1
             let count = Int(min(arg2, 10_000_000))
             guard count >= 0 else { return -1 }
-            var pathBytes: [UInt8] = []
-            var p = pathAddr
-            for _ in 0..<256 {
-                guard let b = try? memory.read8(p) else { break }
-                if b == 0 { break }
-                pathBytes.append(b)
-                p += 1
-            }
+            let pathBytes = memory.hostReadCString(from: pathAddr, maxLength: 256)
             guard let filename = String(bytes: pathBytes, encoding: .utf8),
                   !filename.contains(".."), !filename.contains("/") else { return -1 }
-            var bytes = [UInt8]()
-            bytes.reserveCapacity(count)
-            for k in 0..<count {
-                guard let b = try? memory.read8(bufAddr + UInt64(k)) else { break }
-                bytes.append(b)
-            }
+            let bytes = memory.loadHostBytes(from: bufAddr, count: count)
             let url = sharedDir.appendingPathComponent(filename)
             do {
                 try Data(bytes).write(to: url, options: .atomic)
